@@ -3,7 +3,7 @@
   "common": {
     "name": "homeconnect-local",
     "version": "0.0.6",
-    "icon": "homeconnect-local.png",
+    "icon": "homeconnect-local.svg",
     "news": {
       "0.0.6": {
         "en": "Adds generic local write states, post-install restart helper and adapter logo.",

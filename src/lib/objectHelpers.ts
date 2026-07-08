@@ -3,12 +3,6 @@ export async function ensureChannel(adapter: ioBroker.Adapter, id: string, name:
 }
 
 export async function ensureStateObject(adapter: ioBroker.Adapter, id: string, name: string, value: ioBroker.StateValue, role?: string, write = false, metadata: Partial<ioBroker.StateCommon> = {}): Promise<void> {
-  if (isSuppressedEnumCompanionState(id)) {
-    const existing = await adapter.getObjectAsync(id);
-    if (existing) await adapter.delObjectAsync(id);
-    return;
-  }
-
   const type = typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string";
   const desiredRole = role ?? (type === "boolean" ? "indicator" : "value");
   const sanitizedMetadata = sanitizeMetadataForType(metadata, type);
@@ -43,10 +37,6 @@ function sanitizeMetadataForType(metadata: Partial<ioBroker.StateCommon>, type: 
 
   const { min: _min, max: _max, step: _step, ...rest } = metadata;
   return rest;
-}
-
-function isSuppressedEnumCompanionState(id: string): boolean {
-  return /\.(settings|events)\..+_(?:raw|de)$/.test(id);
 }
 
 function commonChanged(existing: ioBroker.StateCommon | undefined, metadata: Partial<ioBroker.StateCommon>): boolean {

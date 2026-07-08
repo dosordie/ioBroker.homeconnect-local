@@ -559,6 +559,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async writeEnumCompanionStates(device: RunningDevice, target: StateTarget): Promise<void> {
+    if (!this.shouldWriteEnumCompanionStates(target)) return;
+
     const enumType = device.profile.featureMapping.enumTypeByUid[target.uid];
     const enumText = enumType ? device.profile.featureMapping.enumValuesByType[enumType]?.[String(target.rawValue)] : undefined;
     if (enumText === undefined) return;
@@ -567,6 +569,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.setState(`${baseId}_raw`, Number(target.rawValue), true);
     await this.ensureStateObject(`${baseId}_de`, `${target.name} German`, "", "text");
     await this.setState(`${baseId}_de`, translateEnumValue(target.name, enumText), true);
+  }
+
+  private shouldWriteEnumCompanionStates(target: StateTarget): boolean {
+    return target.category === "phases" || target.category === "status" || target.category === "program";
   }
 
   private rawProgramForName(device: RunningDevice, value: ioBroker.StateValue): unknown {

@@ -1,5 +1,7 @@
 {
   "Main settings": "Haupteinstellungen",
+  "Profile ZIP files": "Profil-ZIP-Dateien",
+  "Recommended now: copy Home Connect profile ZIP files into the configured container profile directory and set that path below. The ioBroker Files tab can upload files into adapter file storage; direct scanning from that storage is planned for a later version.": "Aktuell empfohlen: Home-Connect-Profil-ZIP-Dateien in den konfigurierten Container-Profilordner kopieren und diesen Pfad unten eintragen. Der ioBroker-Menüpunkt Dateien kann Dateien in die Adapter-Dateiablage hochladen; das direkte Scannen aus dieser Ablage ist für eine spätere Version geplant.",
   "Profile directory path": "Profilordner-Pfad",
   "Absolute container path to a directory containing Home Connect profile ZIP files. A single ZIP or extracted profile directory is still supported.": "Absoluter Container-Pfad zu einem Ordner mit Home-Connect-Profil-ZIP-Dateien. Ein einzelnes ZIP oder ein entpackter Profilordner wird weiterhin unterstützt.",
   "Automatically add scanned profiles to the device table": "Gescannte Profile automatisch zur Gerätetabelle hinzufügen",

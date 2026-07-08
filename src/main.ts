@@ -370,7 +370,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
       if (writableState.kind === "command" || writableState.kind === "startProgram" || writableState.kind === "startProgramWithOptions") {
         await this.setState(writableState.stateId, true, true);
-        setTimeout(() => void this.setState(writableState.stateId, false, true), 750);
+        setTimeout(() => void this.setState(writableState.stateId, false, true).catch(error => {
+          this.log.warn(`${writableState.stateId}: resetting command state failed: ${String(error)}`);
+        }), 750);
       } else {
         await this.setState(writableState.stateId, this.normalizeWrittenAckValue(writableState, rawValue), true);
       }

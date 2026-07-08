@@ -161,6 +161,7 @@ export class HomeConnectClient {
     const serialized = dumpMessage(prepared);
     this.log?.debug(`HC SEND ${serialized}`);
     const responsePromise = this.pendingResponses.create(prepared.msgID, prepared.resource, timeoutMs);
+    responsePromise.catch(() => undefined);
 
     await this.socket.send(serialized);
     const response = await responsePromise;

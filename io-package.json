@@ -74,6 +74,7 @@
     "enabled": true,
     "readme": "https://github.com/dosordie/ioBroker.homeconnect-local/blob/main/README.md",
     "loglevel": "info",
+    "restartAdapters": ["homeconnect-local"],
     "type": "household",
     "compact": true,
     "connectionType": "local",

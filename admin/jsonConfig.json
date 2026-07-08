@@ -8,8 +8,15 @@
       "items": {
         "profilePath": {
           "type": "text",
-          "label": "Profile ZIP or directory path",
-          "help": "Absolute path to a profile ZIP created by homeconnect-profile-downloader or to a directory containing extracted profile JSON/XML files.",
+          "label": "Profile directory path",
+          "help": "Absolute container path to a directory containing Home Connect profile ZIP files. A single ZIP or extracted profile directory is still supported.",
+          "sm": 12,
+          "md": 12
+        },
+        "autoAddProfiles": {
+          "type": "checkbox",
+          "label": "Automatically add scanned profiles to the device table",
+          "help": "New profiles are added as disabled device suggestions. Existing enabled, host and haId values are preserved.",
           "sm": 12,
           "md": 12
         },
@@ -41,6 +48,7 @@
         "devices": {
           "type": "table",
           "label": "Appliances",
+          "help": "Profiles found in the profile directory are added automatically as disabled suggestions. Enable a row and enter the appliance IP or hostname.",
           "items": [
             {
               "attr": "enabled",
@@ -49,14 +57,52 @@
               "width": "90"
             },
             {
-              "attr": "haId",
+              "attr": "name",
               "type": "text",
-              "title": "haId from profile"
+              "title": "Name",
+              "width": "220"
             },
             {
               "attr": "host",
               "type": "text",
-              "title": "IP or host"
+              "title": "IP or host",
+              "width": "160"
+            },
+            {
+              "attr": "haId",
+              "type": "text",
+              "title": "haId from profile",
+              "width": "260"
+            },
+            {
+              "attr": "type",
+              "type": "text",
+              "title": "Type",
+              "width": "120"
+            },
+            {
+              "attr": "brand",
+              "type": "text",
+              "title": "Brand",
+              "width": "120"
+            },
+            {
+              "attr": "vib",
+              "type": "text",
+              "title": "VIB",
+              "width": "140"
+            },
+            {
+              "attr": "connectionType",
+              "type": "text",
+              "title": "Connection",
+              "width": "120"
+            },
+            {
+              "attr": "profileFile",
+              "type": "text",
+              "title": "Profile file",
+              "width": "360"
             }
           ]
         }

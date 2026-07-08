@@ -107,14 +107,18 @@ export class StateMapper {
       return null;
     }
 
+    const key = String(rawValue);
     const enumType = this.profile.featureMapping.enumTypeByUid[uid];
     if (enumType) {
       const enumMap = this.profile.featureMapping.enumValuesByType[enumType];
-      const key = String(rawValue);
       const mapped = enumMap?.[key];
       if (mapped !== undefined) {
         return mapped;
       }
+    }
+
+    if (PHASE_NAMES.has(lastMeaningfulNamePart(this.profile.featureMapping.featuresByUid[uid] ?? ""))) {
+      return `Unknown(${key})`;
     }
 
     if (typeof rawValue === "number") {

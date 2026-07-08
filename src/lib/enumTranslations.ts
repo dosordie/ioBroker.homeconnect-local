@@ -6,6 +6,12 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     FinalRinse: "Klarspülen",
     Drying: "Trocknen",
   },
+  ProcessPhase: {
+    NoPhase: "Keine Phase",
+    DepthCarePhase1: "Pflegephase 1",
+    DepthCarePhase2: "Pflegephase 2",
+    AnyPhase: "Beliebige Phase",
+  },
   PowerState: { Off: "Aus", On: "Ein" },
   OperationState: {
     Inactive: "Inaktiv",
@@ -21,7 +27,11 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
   RemoteControl: { Active: "Aktiv", Inactive: "Inaktiv" },
 };
 
-export function translateEnumValue(featureName: string | undefined, enumText: string): string {
+export function translateEnumValue(featureName: string | undefined, enumText: string, rawValue?: unknown): string {
   const featureKey = featureName?.split(".").pop();
-  return (featureKey ? TRANSLATIONS[featureKey]?.[enumText] : undefined) ?? enumText;
+  const translated = (featureKey ? TRANSLATIONS[featureKey]?.[enumText] : undefined) ?? enumText;
+  if (translated.startsWith("Unknown(")) {
+    return `Unbekannt (${String(rawValue)})`;
+  }
+  return translated;
 }

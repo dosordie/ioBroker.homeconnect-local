@@ -2,8 +2,16 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.1",
+    "version": "0.0.3",
     "news": {
+      "0.0.3": {
+        "en": "Fixes config loading after adapter startup and improves first local dishwasher test handling.",
+        "de": "Korrigiert das Laden der Konfiguration nach Adapterstart und verbessert den ersten lokalen Geschirrspüler-Test."
+      },
+      "0.0.2": {
+        "en": "Adds experimental TLS-PSK transport and build support for GitHub installation.",
+        "de": "Ergänzt experimentellen TLS-PSK-Transport und Build-Unterstützung für GitHub-Installation."
+      },
       "0.0.1": {
         "en": "Initial read-only proof of concept for AES based Home Connect Local devices.",
         "de": "Erster Read-only-Proof-of-Concept für AES-basierte Home-Connect-Local-Geräte."

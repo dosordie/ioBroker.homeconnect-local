@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { HomeConnectAesSocket } from "./aesSocket";
 import { appIdentityResponse, extractInitialMessageId, parseServiceVersions, serviceKeyForResource } from "./clientProtocol";
 import { dumpMessage, parseMessage } from "./message";
+import { PendingResponses } from "./pendingResponses";
 import { HomeConnectSocketLike } from "./socket";
 import { HomeConnectTlsSocket } from "./tlsSocket";
 import { ConnectionType, HcMessage } from "./types";
@@ -19,12 +20,6 @@ export interface HomeConnectClientOptions {
   closeHandler?: (error?: Error) => void;
 }
 
-interface PendingResponse {
-  resolve: (message: HcMessage) => void;
-  reject: (error: Error) => void;
-  timeout: NodeJS.Timeout;
-}
-
 export class HomeConnectClient {
   private readonly socket: HomeConnectSocketLike;
   private readonly appName: string;
@@ -32,11 +27,11 @@ export class HomeConnectClient {
   private readonly log?: HomeConnectClientOptions["log"];
   private readonly messageHandler?: HomeConnectClientOptions["messageHandler"];
   private readonly closeHandler?: HomeConnectClientOptions["closeHandler"];
+  private readonly pendingResponses = new PendingResponses();
 
   private serviceVersions: Record<string, number> = {};
   private sid?: number;
   private lastMsgId?: number;
-  private readonly pendingResponses = new Map<number, PendingResponse>();
   private connected = false;
 
   public constructor(options: HomeConnectClientOptions) {
@@ -110,7 +105,7 @@ export class HomeConnectClient {
 
   public async close(): Promise<void> {
     this.connected = false;
-    this.rejectPending(new Error("Home Connect client closed"));
+    this.pendingResponses.rejectAll(new Error("Home Connect client closed"));
     await this.socket.close();
   }
 
@@ -150,15 +145,7 @@ export class HomeConnectClient {
 
     const serialized = dumpMessage(prepared);
     this.log?.debug(`HC SEND ${serialized}`);
-
-    const responsePromise = new Promise<HcMessage>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingResponses.delete(prepared.msgID as number);
-        reject(new Error(`Timeout waiting for response to ${prepared.resource}`));
-      }, timeoutMs);
-
-      this.pendingResponses.set(prepared.msgID as number, { resolve, reject, timeout });
-    });
+    const responsePromise = this.pendingResponses.create(prepared.msgID, prepared.resource, timeoutMs);
 
     await this.socket.send(serialized);
     const response = await responsePromise;
@@ -205,14 +192,8 @@ export class HomeConnectClient {
       return;
     }
 
-    if (message.action === "RESPONSE" && message.msgID !== undefined) {
-      const pending = this.pendingResponses.get(message.msgID);
-      if (pending) {
-        clearTimeout(pending.timeout);
-        this.pendingResponses.delete(message.msgID);
-        pending.resolve(message);
-        return;
-      }
+    if (message.action === "RESPONSE" && this.pendingResponses.resolve(message)) {
+      return;
     }
 
     await this.forwardMessage(message);
@@ -240,15 +221,7 @@ export class HomeConnectClient {
   private handleSocketClose(code: number, reason: string): void {
     this.log?.warn(`Home Connect socket closed: ${code} ${reason}`);
     this.connected = false;
-    this.rejectPending(new Error(`Socket closed: ${code} ${reason}`));
+    this.pendingResponses.rejectAll(new Error(`Socket closed: ${code} ${reason}`));
     this.closeHandler?.();
-  }
-
-  private rejectPending(error: Error): void {
-    for (const [msgId, pending] of this.pendingResponses.entries()) {
-      clearTimeout(pending.timeout);
-      pending.reject(error);
-      this.pendingResponses.delete(msgId);
-    }
   }
 }

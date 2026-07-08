@@ -446,8 +446,26 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private logConnectionFailure(device: RunningDevice, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     device.reconnectFailures += 1;
+
+    if (this.isExpectedOfflineError(message)) {
+      if (device.reconnectFailures === 1) this.log.info(`${device.profile.haId}: offline: ${message}`);
+      else this.log.debug(`${device.profile.haId}: still offline, retrying: ${message}`);
+      return;
+    }
+
     if (device.reconnectFailures === 1) this.log.warn(`${device.profile.haId}: connection failed: ${message}`);
     else this.log.debug(`${device.profile.haId}: still offline, retrying: ${message}`);
+  }
+
+  private isExpectedOfflineError(message: string): boolean {
+    return [
+      "EHOSTUNREACH",
+      "ENETUNREACH",
+      "EHOSTDOWN",
+      "ETIMEDOUT",
+      "ECONNREFUSED",
+      "Timeout while connecting",
+    ].some(marker => message.includes(marker));
   }
 
   private async setDeviceConnectionState(device: RunningDevice, connected: boolean, error?: unknown): Promise<void> {

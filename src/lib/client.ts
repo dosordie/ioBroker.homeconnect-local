@@ -2,12 +2,15 @@ import crypto from "node:crypto";
 
 import { HomeConnectAesSocket } from "./aesSocket";
 import { dumpMessage, parseMessage, responseFor } from "./message";
-import { HcMessage } from "./types";
+import { HomeConnectSocketLike } from "./socket";
+import { HomeConnectTlsSocket } from "./tlsSocket";
+import { ConnectionType, HcMessage } from "./types";
 
 export interface HomeConnectClientOptions {
   host: string;
+  connectionType: ConnectionType | string;
   key: string;
-  iv: string;
+  iv?: string;
   appName: string;
   appId: string;
   log?: Pick<ioBroker.Logger, "debug" | "info" | "warn" | "error">;
@@ -22,7 +25,7 @@ interface PendingResponse {
 }
 
 export class HomeConnectClient {
-  private readonly socket: HomeConnectAesSocket;
+  private readonly socket: HomeConnectSocketLike;
   private readonly appName: string;
   private readonly appId: string;
   private readonly log?: HomeConnectClientOptions["log"];
@@ -36,7 +39,15 @@ export class HomeConnectClient {
   private connected = false;
 
   public constructor(options: HomeConnectClientOptions) {
-    this.socket = new HomeConnectAesSocket(options.host, options.key, options.iv);
+    if (options.connectionType === "TLS") {
+      this.socket = new HomeConnectTlsSocket(options.host, options.key);
+    } else {
+      if (!options.iv) {
+        throw new Error("AES connection requires an IV from the appliance profile");
+      }
+      this.socket = new HomeConnectAesSocket(options.host, options.key, options.iv);
+    }
+
     this.appName = options.appName;
     this.appId = options.appId;
     this.log = options.log;

@@ -17,9 +17,9 @@ interface RunningDevice {
 }
 
 class HomeconnectLocalAdapter extends utils.Adapter {
-  private readonly nativeConfig: AdapterNativeConfig;
-  private readonly devices = new Map<string, RunningDevice>();
+  private devices = new Map<string, RunningDevice>();
   private unloaded = false;
+  private currentConfig: AdapterNativeConfig = {} as AdapterNativeConfig;
 
   public constructor(options: Partial<utils.AdapterOptions> = {}) {
     super({
@@ -27,16 +27,19 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       name: "homeconnect-local",
     });
 
-    this.nativeConfig = this.config as AdapterNativeConfig;
-
     this.on("ready", () => void this.onReady());
     this.on("unload", callback => void this.onUnload(callback));
   }
 
   private async onReady(): Promise<void> {
+    this.currentConfig = this.config as AdapterNativeConfig;
+
+    await this.ensureInfoConnectionObject();
     await this.setState("info.connection", false, true);
 
-    const profilePath = this.nativeConfig.profilePath?.trim();
+    this.log.debug(`Native config at startup: ${JSON.stringify(this.currentConfig)}`);
+
+    const profilePath = this.currentConfig.profilePath?.trim();
     if (!profilePath) {
       this.log.warn("No profilePath configured. Add a profile ZIP or extracted profile directory in the adapter settings.");
       return;
@@ -52,7 +55,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     this.log.info(`Loaded ${profiles.length} Home Connect profile(s) from ${profilePath}`);
     const profilesByHaId = new Map(profiles.map(profile => [profile.haId, profile]));
-    const configuredDevices = this.nativeConfig.devices ?? [];
+    const configuredDevices = this.currentConfig.devices ?? [];
 
     for (const configuredDevice of configuredDevices) {
       if (!configuredDevice.enabled) {
@@ -83,6 +86,21 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.prepareDeviceObjects(runningDevice);
       await this.connectDevice(runningDevice);
     }
+  }
+
+  private async ensureInfoConnectionObject(): Promise<void> {
+    await this.setObjectNotExistsAsync("info.connection", {
+      type: "state",
+      common: {
+        name: "If connected to at least one appliance",
+        type: "boolean",
+        role: "indicator.connected",
+        read: true,
+        write: false,
+        def: false,
+      },
+      native: {},
+    });
   }
 
   private async prepareDeviceObjects(device: RunningDevice): Promise<void> {
@@ -181,8 +199,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       connectionType: device.profile.connectionType,
       key: device.profile.key,
       iv: device.profile.iv,
-      appName: this.nativeConfig.appName || "ioBroker HomeConnect Local",
-      appId: this.nativeConfig.appId || "iobroker-homeconnect-local",
+      appName: this.currentConfig.appName || "ioBroker HomeConnect Local",
+      appId: this.currentConfig.appId || "iobroker-homeconnect-local",
       log: this.log,
       messageHandler: message => this.handleDeviceMessage(device, message),
       closeHandler: error => this.scheduleReconnect(device, error),
@@ -197,6 +215,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       this.log.info(`${device.profile.haId}: connected`);
       await client.readInitialValues();
     } catch (error) {
+      await client.close().catch(closeError => this.log.debug(`Close after failed connect failed: ${String(closeError)}`));
       await this.setState(`${device.baseId}.info.connected`, false, true);
       await this.updateGlobalConnectionState();
       this.log.warn(`${device.profile.haId}: connection failed: ${String(error)}`);
@@ -217,7 +236,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     void this.setState(`${device.baseId}.info.connected`, false, true);
     void this.updateGlobalConnectionState();
 
-    const seconds = Math.max(5, Number(this.nativeConfig.reconnectInterval ?? 30));
+    const seconds = Math.max(5, Number(this.currentConfig.reconnectInterval ?? 30));
     device.reconnectTimer = setTimeout(() => {
       device.reconnecting = false;
       void this.connectDevice(device);
@@ -228,7 +247,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.setState(`${device.baseId}.info.lastMessage`, JSON.stringify(message), true);
 
     if (message.resource?.startsWith("/ro/")) {
-      if (this.nativeConfig.debugRaw) {
+      if (this.currentConfig.debugRaw) {
         this.log.debug(`${device.profile.haId}: ${message.resource} ${JSON.stringify(message.data)}`);
       }
 
@@ -251,7 +270,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(stateId, target.name, target.value);
     await this.setState(stateId, target.value, true);
 
-    if (this.nativeConfig.debugRaw) {
+    if (this.currentConfig.debugRaw) {
       await this.ensureStateObject(rawStateId, `Raw ${target.uid} ${target.name}`, JSON.stringify(value));
       await this.setState(rawStateId, JSON.stringify(value), true);
     }

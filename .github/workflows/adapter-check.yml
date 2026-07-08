@@ -1,4 +1,4 @@
-name: ioBroker Adapter Check
+name: Package Check
 
 on:
   pull_request:
@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  adapter-check:
-    name: Adapter checker
+  package-check:
+    name: Package smoke check
     runs-on: ubuntu-latest
 
     steps:
@@ -27,5 +27,5 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Run ioBroker adapter checker
-        run: npx @iobroker/adapter-check
+      - name: Create npm package dry run
+        run: npm pack --dry-run

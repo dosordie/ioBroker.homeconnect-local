@@ -2,9 +2,13 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.14",
+    "version": "0.0.15",
     "icon": "homeconnect-local.svg",
     "news": {
+      "0.0.15": {
+        "en": "Adds workflow fixes and prepares the first main branch release candidate.",
+        "de": "Ergänzt Workflow-Korrekturen und bereitet den ersten Release-Kandidaten auf main vor."
+      },
       "0.0.14": {
         "en": "Completes internal refactoring by using shared constants, runtime types and value conversion helpers.",
         "de": "Schließt internes Refactoring ab und nutzt gemeinsame Konstanten, Runtime-Typen und Hilfsfunktionen zur Wertumwandlung."

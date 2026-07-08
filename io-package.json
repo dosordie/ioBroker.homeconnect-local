@@ -1,0 +1,79 @@
+{
+  "_id": "homeconnect-local",
+  "common": {
+    "name": "homeconnect-local",
+    "version": "0.0.1",
+    "news": {
+      "0.0.1": {
+        "en": "Initial read-only proof of concept for AES based Home Connect Local devices.",
+        "de": "Erster Read-only-Proof-of-Concept für AES-basierte Home-Connect-Local-Geräte."
+      }
+    },
+    "titleLang": {
+      "en": "Home Connect Local",
+      "de": "Home Connect Local"
+    },
+    "desc": {
+      "en": "Local LAN monitoring for Bosch/Siemens/BSH Home Connect appliances without using the cloud API during runtime.",
+      "de": "Lokales LAN-Monitoring für Bosch/Siemens/BSH Home-Connect-Geräte ohne Cloud-API im laufenden Betrieb."
+    },
+    "authors": [
+      "dosordie"
+    ],
+    "keywords": [
+      "homeconnect",
+      "home-connect",
+      "bosch",
+      "siemens",
+      "bsh",
+      "local",
+      "lan"
+    ],
+    "license": "MIT",
+    "platform": "Javascript/Node.js",
+    "mode": "daemon",
+    "enabled": true,
+    "readme": "https://github.com/dosordie/ioBroker.homeconnect-local/blob/main/README.md",
+    "loglevel": "info",
+    "type": "household",
+    "compact": true,
+    "connectionType": "local",
+    "dataSource": "push",
+    "adminUI": {
+      "config": "json"
+    },
+    "dependencies": [
+      {
+        "js-controller": ">=5.0.0"
+      }
+    ],
+    "globalDependencies": [
+      {
+        "admin": ">=6.0.0"
+      }
+    ]
+  },
+  "native": {
+    "profilePath": "",
+    "appName": "ioBroker HomeConnect Local",
+    "appId": "iobroker-homeconnect-local",
+    "reconnectInterval": 30,
+    "debugRaw": true,
+    "devices": []
+  },
+  "objects": [
+    {
+      "_id": "info.connection",
+      "type": "state",
+      "common": {
+        "role": "indicator.connected",
+        "name": "If connected to at least one appliance",
+        "type": "boolean",
+        "read": true,
+        "write": false,
+        "def": false
+      },
+      "native": {}
+    }
+  ]
+}

@@ -1,15 +1,17 @@
 import * as utils from "@iobroker/adapter-core";
 
 import { HomeConnectClient } from "./lib/client";
-import { sanitizeObjectId } from "./lib/ids";
+import { normalizeUid, sanitizeObjectId } from "./lib/ids";
 import { loadProfiles } from "./lib/profile";
 import { StateMapper } from "./lib/stateMapper";
-import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue } from "./lib/types";
+import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue, StateTarget } from "./lib/types";
 
 const POWER_STATE_UID = "021B";
 const POWER_STATE_UID_NUMBER = 0x021b;
 const POWER_STATE_OFF = 1;
 const POWER_STATE_ON = 2;
+const SELECTED_PROGRAM_FEATURE = "BSH.Common.Root.SelectedProgram";
+const ACTIVE_PROGRAM_FEATURE = "BSH.Common.Root.ActiveProgram";
 
 interface RunningDevice {
   baseId: string;
@@ -19,10 +21,20 @@ interface RunningDevice {
   client?: HomeConnectClient;
   reconnectTimer?: NodeJS.Timeout;
   reconnecting: boolean;
+  writableUids: Set<string>;
+}
+
+interface WritableState {
+  deviceHaId: string;
+  uid: number;
+  featureName: string;
+  kind: "value" | "command" | "startProgram";
+  stateId: string;
 }
 
 class HomeconnectLocalAdapter extends utils.Adapter {
   private devices = new Map<string, RunningDevice>();
+  private writableStates = new Map<string, WritableState>();
   private unloaded = false;
   private currentConfig: AdapterNativeConfig = {} as AdapterNativeConfig;
 
@@ -42,7 +54,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     await this.ensureInfoConnectionObject();
     await this.setState("info.connection", false, true);
-    await this.subscribeStatesAsync("*.settings.PowerState");
+    await this.subscribeStatesAsync("*.settings.*");
+    await this.subscribeStatesAsync("*.options.*");
+    await this.subscribeStatesAsync("*.commands.*");
+    await this.subscribeStatesAsync("*.program.SelectedProgram");
 
     this.log.debug(`Native config at startup: ${JSON.stringify(this.currentConfig)}`);
 
@@ -87,6 +102,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         profile,
         mapper: new StateMapper(profile),
         reconnecting: false,
+        writableUids: new Set<string>(),
       };
 
       this.devices.set(profile.haId, runningDevice);
@@ -128,7 +144,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(`${baseId}.info.connectionType`, "Connection type", "", "text");
     await this.setState(`${baseId}.info.connectionType`, String(profile.connectionType), true);
 
-    for (const channel of ["status", "program", "phases", "options", "settings", "events", "programs", "raw"]) {
+    for (const channel of ["status", "program", "phases", "options", "settings", "events", "programs", "commands", "raw"]) {
       await this.setObjectNotExistsAsync(`${baseId}.${channel}`, {
         type: "channel",
         common: { name: channel },
@@ -137,6 +153,38 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
 
     await this.ensureStateObject(`${baseId}.settings.PowerState`, "BSH.Common.Setting.PowerState", false, "switch", true);
+    this.registerWritableState(device, `${baseId}.settings.PowerState`, POWER_STATE_UID_NUMBER, "BSH.Common.Setting.PowerState", "value");
+
+    await this.prepareCommandObjects(device);
+    await this.prepareStartProgramObject(device);
+  }
+
+  private async prepareCommandObjects(device: RunningDevice): Promise<void> {
+    for (const [uid, featureName] of Object.entries(device.profile.featureMapping.featuresByUid)) {
+      if (!featureName.includes(".Command.")) {
+        continue;
+      }
+
+      const numericUid = this.uidStringToNumber(uid);
+      if (numericUid === undefined) {
+        continue;
+      }
+
+      const stateId = `${device.baseId}.commands.${sanitizeObjectId(featureName.split(".Command.")[1] ?? featureName)}`;
+      await this.ensureStateObject(stateId, featureName, false, "button", true);
+      this.registerWritableState(device, stateId, numericUid, featureName, "command");
+    }
+  }
+
+  private async prepareStartProgramObject(device: RunningDevice): Promise<void> {
+    const activeProgramUid = this.uidForFeature(device.profile, ACTIVE_PROGRAM_FEATURE);
+    if (activeProgramUid === undefined) {
+      return;
+    }
+
+    const stateId = `${device.baseId}.commands.StartProgram`;
+    await this.ensureStateObject(stateId, "Start selected program", false, "button", true);
+    this.registerWritableState(device, stateId, activeProgramUid, ACTIVE_PROGRAM_FEATURE, "startProgram");
   }
 
   private async connectDevice(device: RunningDevice): Promise<void> {
@@ -191,28 +239,126 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
 
     const relativeId = id.startsWith(`${this.namespace}.`) ? id.slice(this.namespace.length + 1) : id;
-    const match = relativeId.match(/^(.+)\.settings\.PowerState$/);
-    if (!match) {
+    const writableState = this.writableStates.get(relativeId);
+    if (!writableState) {
       return;
     }
 
-    const baseId = match[1];
-    const device = Array.from(this.devices.values()).find(item => item.baseId === baseId);
+    const device = this.devices.get(writableState.deviceHaId);
     if (!device?.client) {
-      this.log.warn(`${baseId}: cannot write PowerState, device is not connected`);
+      this.log.warn(`${relativeId}: cannot write ${writableState.featureName}, device is not connected`);
       return;
     }
-
-    const powerOn = this.stateValueToPowerBoolean(state.val);
-    const value = powerOn ? POWER_STATE_ON : POWER_STATE_OFF;
 
     try {
-      this.log.info(`${device.profile.haId}: writing PowerState ${powerOn ? "On" : "Off"} (${value})`);
-      await device.client.writeValue(POWER_STATE_UID_NUMBER, value);
-      await this.setState(`${device.baseId}.settings.PowerState`, powerOn, true);
+      const rawValue = await this.valueForWrite(device, writableState, state.val);
+      if (rawValue === undefined) {
+        return;
+      }
+
+      this.log.info(`${device.profile.haId}: writing ${writableState.featureName} = ${JSON.stringify(rawValue)}`);
+      await device.client.writeValue(writableState.uid, rawValue);
+
+      if (writableState.kind === "command" || writableState.kind === "startProgram") {
+        await this.setState(writableState.stateId, true, true);
+        setTimeout(() => void this.setState(writableState.stateId, false, true), 750);
+      } else {
+        await this.setState(writableState.stateId, this.normalizeWrittenAckValue(writableState, rawValue), true);
+      }
     } catch (error) {
-      this.log.warn(`${device.profile.haId}: writing PowerState failed: ${String(error)}`);
+      this.log.warn(`${device.profile.haId}: writing ${writableState.featureName} failed: ${String(error)}`);
     }
+  }
+
+  private async valueForWrite(device: RunningDevice, writableState: WritableState, value: ioBroker.StateValue): Promise<unknown> {
+    if (writableState.kind === "command") {
+      if (!this.isTruthyWrite(value)) {
+        return undefined;
+      }
+      return true;
+    }
+
+    if (writableState.kind === "startProgram") {
+      if (!this.isTruthyWrite(value)) {
+        return undefined;
+      }
+
+      const selectedProgramUid = this.uidForFeature(device.profile, SELECTED_PROGRAM_FEATURE);
+      if (selectedProgramUid === undefined) {
+        this.log.warn(`${device.profile.haId}: cannot start program, SelectedProgram UID missing`);
+        return undefined;
+      }
+
+      const selectedProgramState = await this.getStateAsync(`${device.baseId}.program.SelectedProgram`);
+      const selectedProgramRaw = this.stateValueToRaw(device, selectedProgramUid, selectedProgramState?.val);
+      if (selectedProgramRaw === undefined || selectedProgramRaw === 0 || selectedProgramRaw === "") {
+        this.log.warn(`${device.profile.haId}: cannot start program, no selected program is known`);
+        return undefined;
+      }
+
+      return selectedProgramRaw;
+    }
+
+    if (writableState.uid === POWER_STATE_UID_NUMBER) {
+      return this.stateValueToPowerBoolean(value) ? POWER_STATE_ON : POWER_STATE_OFF;
+    }
+
+    return this.stateValueToRaw(device, writableState.uid, value);
+  }
+
+  private normalizeWrittenAckValue(writableState: WritableState, rawValue: unknown): ioBroker.StateValue {
+    if (writableState.uid === POWER_STATE_UID_NUMBER) {
+      return Number(rawValue) === POWER_STATE_ON;
+    }
+
+    if (typeof rawValue === "boolean" || typeof rawValue === "number" || typeof rawValue === "string") {
+      return rawValue;
+    }
+
+    return JSON.stringify(rawValue);
+  }
+
+  private stateValueToRaw(device: RunningDevice, uid: number, value: ioBroker.StateValue): unknown {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    const normalizedUid = normalizeUid(uid);
+    if (!normalizedUid) {
+      return value;
+    }
+
+    if (typeof value === "boolean" || typeof value === "number") {
+      return value;
+    }
+
+    const text = String(value);
+    const numericText = Number(text);
+    if (text.trim() !== "" && Number.isFinite(numericText)) {
+      return numericText;
+    }
+
+    const enumType = device.profile.featureMapping.enumTypeByUid[normalizedUid];
+    if (enumType) {
+      const enumMap = device.profile.featureMapping.enumValuesByType[enumType] ?? {};
+      const lower = text.toLowerCase();
+      for (const [raw, label] of Object.entries(enumMap)) {
+        if (String(label).toLowerCase() === lower || String(label).split(".").pop()?.toLowerCase() === lower) {
+          const rawNumeric = Number(raw);
+          return Number.isFinite(rawNumeric) ? rawNumeric : raw;
+        }
+      }
+    }
+
+    const wanted = text.toLowerCase();
+    for (const [rawUid, featureName] of Object.entries(device.profile.featureMapping.featuresByUid)) {
+      const lastPart = featureName.split(".").pop()?.toLowerCase();
+      if (featureName.toLowerCase() === wanted || lastPart === wanted) {
+        return this.uidStringToNumber(rawUid) ?? rawUid;
+      }
+    }
+
+    return value;
   }
 
   private stateValueToPowerBoolean(value: ioBroker.StateValue): boolean {
@@ -226,6 +372,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     const text = String(value).toLowerCase();
     return text === "on" || text.endsWith(".on") || text === "true" || text === "1" || text === "ein";
+  }
+
+  private isTruthyWrite(value: ioBroker.StateValue): boolean {
+    return value === true || value === 1 || String(value).toLowerCase() === "true" || String(value).toLowerCase() === "1";
   }
 
   private scheduleReconnect(device: RunningDevice, error?: Error): void {
@@ -252,6 +402,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(`${device.baseId}.info.lastMessage`, "Last raw Home Connect message", "", "json");
     await this.setState(`${device.baseId}.info.lastMessage`, JSON.stringify(message), true);
 
+    if (message.resource === "/ro/allDescriptionChanges" || message.resource === "/ro/descriptionChange") {
+      await this.applyDescriptionChanges(device, message.data);
+    }
+
     if (message.resource?.startsWith("/ro/")) {
       if (this.currentConfig.debugRaw) {
         this.log.debug(`${device.profile.haId}: ${message.resource} ${JSON.stringify(message.data)}`);
@@ -259,7 +413,35 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
       const values = device.mapper.valuesFromMessageData(message.data);
       for (const value of values) {
-        await this.writeRoValue(device, value);
+        if ("value" in value) {
+          await this.writeRoValue(device, value);
+        }
+      }
+    }
+  }
+
+  private async applyDescriptionChanges(device: RunningDevice, data: unknown): Promise<void> {
+    const values = device.mapper.valuesFromMessageData(data);
+    for (const value of values) {
+      const uid = normalizeUid(value.uid);
+      if (!uid) {
+        continue;
+      }
+
+      const access = typeof value.access === "string" ? value.access : undefined;
+      if (access === "READWRITE") {
+        device.writableUids.add(uid);
+      } else if (access === "READ" || access === "NONE") {
+        device.writableUids.delete(uid);
+      }
+
+      const target = device.mapper.toStateTarget({ uid, value: "" });
+      if (target && this.canWriteTarget(device, target)) {
+        const stateId = `${device.baseId}.${target.id}`;
+        const normalizedValue = target.uid === POWER_STATE_UID ? false : "";
+        const role = target.uid === POWER_STATE_UID ? "switch" : undefined;
+        await this.ensureStateObject(stateId, target.name, normalizedValue, role, true);
+        this.registerWritableState(device, stateId, this.uidStringToNumber(uid) ?? Number(uid), target.name, "value");
       }
     }
   }
@@ -273,12 +455,19 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const stateId = `${device.baseId}.${target.id}`;
     const rawStateId = `${device.baseId}.raw.uid_${target.uid}`;
     const normalizedValue = this.normalizeTargetValue(target);
-    const isWritable = target.uid === POWER_STATE_UID;
+    const isWritable = this.canWriteTarget(device, target);
     const role = target.uid === POWER_STATE_UID ? "switch" : undefined;
     const rawValue = JSON.stringify(value);
 
     await this.ensureStateObject(stateId, target.name, normalizedValue, role, isWritable);
     await this.setState(stateId, normalizedValue, true);
+
+    if (isWritable) {
+      const numericUid = this.uidStringToNumber(target.uid);
+      if (numericUid !== undefined) {
+        this.registerWritableState(device, stateId, numericUid, target.name, "value");
+      }
+    }
 
     if (this.currentConfig.debugRaw) {
       await this.ensureStateObject(rawStateId, `Raw ${target.uid} ${target.name}`, "", "json");
@@ -286,7 +475,29 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
   }
 
-  private normalizeTargetValue(target: { uid: string; value: unknown; rawValue: unknown }): ioBroker.StateValue {
+  private canWriteTarget(device: RunningDevice, target: StateTarget): boolean {
+    if (target.uid === POWER_STATE_UID) {
+      return true;
+    }
+
+    if (target.name === SELECTED_PROGRAM_FEATURE) {
+      return true;
+    }
+
+    return device.writableUids.has(target.uid) && (target.category === "settings" || target.category === "options" || target.category === "program");
+  }
+
+  private registerWritableState(device: RunningDevice, stateId: string, uid: number, featureName: string, kind: WritableState["kind"]): void {
+    this.writableStates.set(stateId, {
+      deviceHaId: device.profile.haId,
+      uid,
+      featureName,
+      kind,
+      stateId,
+    });
+  }
+
+  private normalizeTargetValue(target: StateTarget): ioBroker.StateValue {
     if (target.uid === POWER_STATE_UID) {
       return Number(target.rawValue) === POWER_STATE_ON;
     }
@@ -336,6 +547,26 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         native: existing.native ?? {},
       });
     }
+  }
+
+  private uidForFeature(profile: ApplianceProfile, featureName: string): number | undefined {
+    for (const [uid, mappedFeatureName] of Object.entries(profile.featureMapping.featuresByUid)) {
+      if (mappedFeatureName === featureName) {
+        return this.uidStringToNumber(uid);
+      }
+    }
+
+    return undefined;
+  }
+
+  private uidStringToNumber(uid: string): number | undefined {
+    const normalized = normalizeUid(uid);
+    if (!normalized) {
+      return undefined;
+    }
+
+    const parsed = Number.parseInt(normalized, 16);
+    return Number.isFinite(parsed) ? parsed : undefined;
   }
 
   private async updateGlobalConnectionState(): Promise<void> {

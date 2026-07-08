@@ -516,7 +516,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       if (!target) continue;
       const stateId = `${device.baseId}.${target.id}`;
       const writable = this.canWriteTarget(device, target);
-      await this.ensureStateObject(stateId, target.name, target.uid === POWER_STATE_UID ? false : "", target.uid === POWER_STATE_UID ? "switch" : undefined, writable, this.commonMetadata(device, target, value));
+      await this.ensureStateObject(stateId, target.name, this.initialTargetValue(target), target.uid === POWER_STATE_UID ? "switch" : undefined, writable, this.commonMetadata(device, target, value));
       await this.writeStateMetadata(device, target, access, value.available !== false, writable, value.raw ?? value);
       if (writable) this.registerWritableState(device, stateId, this.uidStringToNumber(uid) ?? Number(uid), target.name, "value");
       if (target.name === SELECTED_PROGRAM_FEATURE || target.name === ACTIVE_PROGRAM_FEATURE) await this.prepareRootProgramAliasObjects(device);
@@ -592,12 +592,13 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     const enumType = device.profile.featureMapping.enumTypeByUid[target.uid];
     const enumText = enumType ? device.profile.featureMapping.enumValuesByType[enumType]?.[String(target.rawValue)] : undefined;
-    if (enumText === undefined) return;
+    const companionText = enumText ?? (target.category === "phases" ? String(target.value) : undefined);
+    if (companionText === undefined) return;
     const baseId = `${device.baseId}.${target.id}`;
     await this.ensureStateObject(`${baseId}_raw`, `${target.name} raw`, 0, "value");
     await this.setState(`${baseId}_raw`, Number(target.rawValue), true);
     await this.ensureStateObject(`${baseId}_de`, `${target.name} German`, "", "text");
-    await this.setState(`${baseId}_de`, translateEnumValue(target.name, enumText), true);
+    await this.setState(`${baseId}_de`, translateEnumValue(target.name, companionText, target.rawValue), true);
   }
 
   private shouldWriteEnumCompanionStates(target: StateTarget): boolean {
@@ -640,9 +641,23 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     this.writableStates.set(stateId, { deviceHaId: device.profile.haId, uid, featureName, kind, stateId });
   }
 
+  private initialTargetValue(target: StateTarget): ioBroker.StateValue {
+    if (target.uid === POWER_STATE_UID) return false;
+    if (this.isProgramProgress(target)) return 0;
+    return "";
+  }
+
   private normalizeTargetValue(target: StateTarget): ioBroker.StateValue {
     if (target.uid === POWER_STATE_UID) return Number(target.rawValue) === POWER_STATE_ON;
+    if (this.isProgramProgress(target)) {
+      const progress = Number(target.rawValue);
+      return Number.isFinite(progress) ? progress : 0;
+    }
     return toStateValue(target.value);
+  }
+
+  private isProgramProgress(target: StateTarget): boolean {
+    return /ProgramProgress$/i.test(target.name);
   }
 
   private async setTextState(id: string, value: unknown): Promise<void> { await setTextState(this, id, value); }

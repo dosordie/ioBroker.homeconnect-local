@@ -36,6 +36,18 @@ export class PendingResponses {
     return true;
   }
 
+  public reject(msgId: number, error: Error): boolean {
+    const pending = this.responses.get(msgId);
+    if (!pending) {
+      return false;
+    }
+
+    clearTimeout(pending.timeout);
+    this.responses.delete(msgId);
+    pending.reject(error);
+    return true;
+  }
+
   public rejectAll(error: Error): void {
     for (const [msgId, pending] of this.responses.entries()) {
       clearTimeout(pending.timeout);

@@ -1,0 +1,66 @@
+{
+  "type": "tabs",
+  "i18n": true,
+  "items": {
+    "main": {
+      "type": "panel",
+      "label": "Main settings",
+      "items": {
+        "profilePath": {
+          "type": "text",
+          "label": "Profile ZIP or directory path",
+          "help": "Absolute path to a profile ZIP created by homeconnect-profile-downloader or to a directory containing extracted profile JSON/XML files.",
+          "sm": 12,
+          "md": 12
+        },
+        "appName": {
+          "type": "text",
+          "label": "App name",
+          "sm": 12,
+          "md": 6
+        },
+        "appId": {
+          "type": "text",
+          "label": "App ID",
+          "sm": 12,
+          "md": 6
+        },
+        "reconnectInterval": {
+          "type": "number",
+          "label": "Reconnect interval in seconds",
+          "min": 5,
+          "sm": 12,
+          "md": 6
+        },
+        "debugRaw": {
+          "type": "checkbox",
+          "label": "Create raw uid states and log received /ro values",
+          "sm": 12,
+          "md": 6
+        },
+        "devices": {
+          "type": "table",
+          "label": "Appliances",
+          "items": [
+            {
+              "attr": "enabled",
+              "type": "checkbox",
+              "title": "Enabled",
+              "width": "90"
+            },
+            {
+              "attr": "haId",
+              "type": "text",
+              "title": "haId from profile"
+            },
+            {
+              "attr": "host",
+              "type": "text",
+              "title": "IP or host"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

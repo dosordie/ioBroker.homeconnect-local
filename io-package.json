@@ -2,9 +2,13 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.8",
+    "version": "0.0.9",
     "icon": "homeconnect-local.svg",
     "news": {
+      "0.0.9": {
+        "en": "Adds cloud-adapter-like general.connected and device online indicator mapping.",
+        "de": "Ergänzt cloud-adapterähnliches general.connected und Geräte-Online-Indicator-Mapping."
+      },
       "0.0.8": {
         "en": "Adds profile folder scanning and automatic disabled device suggestions.",
         "de": "Ergänzt Profilordner-Scan und automatische deaktivierte Gerätevorschläge."

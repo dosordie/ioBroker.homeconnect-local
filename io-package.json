@@ -2,9 +2,13 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.7",
+    "version": "0.0.8",
     "icon": "homeconnect-local.svg",
     "news": {
+      "0.0.8": {
+        "en": "Adds profile folder scanning and automatic disabled device suggestions.",
+        "de": "Ergänzt Profilordner-Scan und automatische deaktivierte Gerätevorschläge."
+      },
       "0.0.7": {
         "en": "Removes the failing npm postinstall hook for GitHub installations.",
         "de": "Entfernt den fehlerhaften npm-Postinstall-Hook für GitHub-Installationen."
@@ -60,6 +64,7 @@
     "appId": "iobroker-homeconnect-local",
     "reconnectInterval": 30,
     "debugRaw": true,
+    "autoAddProfiles": true,
     "devices": []
   },
   "objects": [

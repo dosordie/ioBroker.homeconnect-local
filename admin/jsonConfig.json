@@ -48,7 +48,7 @@
         "devices": {
           "type": "table",
           "label": "Appliances",
-          "help": "Profiles found in the profile directory are added automatically as disabled suggestions. Enable a row and enter the appliance IP or hostname.",
+          "help": "Only Enabled, Name and IP or host should normally be edited. The other columns are filled from the scanned profile ZIP files.",
           "items": [
             {
               "attr": "enabled",
@@ -60,49 +60,55 @@
               "attr": "name",
               "type": "text",
               "title": "Name",
-              "width": "220"
+              "width": "260"
             },
             {
               "attr": "host",
               "type": "text",
               "title": "IP or host",
-              "width": "160"
+              "width": "170"
             },
             {
               "attr": "haId",
               "type": "text",
-              "title": "haId from profile",
-              "width": "260"
+              "title": "Profile haId",
+              "width": "320",
+              "readOnly": true
             },
             {
               "attr": "type",
               "type": "text",
               "title": "Type",
-              "width": "120"
+              "width": "130",
+              "readOnly": true
             },
             {
               "attr": "brand",
               "type": "text",
               "title": "Brand",
-              "width": "120"
+              "width": "120",
+              "readOnly": true
             },
             {
               "attr": "vib",
               "type": "text",
               "title": "VIB",
-              "width": "140"
+              "width": "150",
+              "readOnly": true
             },
             {
               "attr": "connectionType",
               "type": "text",
               "title": "Connection",
-              "width": "120"
+              "width": "120",
+              "readOnly": true
             },
             {
               "attr": "profileFile",
               "type": "text",
               "title": "Profile file",
-              "width": "360"
+              "width": "520",
+              "readOnly": true
             }
           ]
         }

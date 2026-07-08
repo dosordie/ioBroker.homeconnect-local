@@ -6,6 +6,15 @@
       "type": "panel",
       "label": "Main settings",
       "items": {
+        "_profileUploadHint": {
+          "type": "infoBox",
+          "title": "Profile ZIP files",
+          "text": "Recommended now: copy Home Connect profile ZIP files into the configured container profile directory and set that path below. The ioBroker Files tab can upload files into adapter file storage; direct scanning from that storage is planned for a later version.",
+          "boxType": "info",
+          "closeable": false,
+          "sm": 12,
+          "md": 12
+        },
         "profilePath": {
           "type": "text",
           "label": "Profile directory path",

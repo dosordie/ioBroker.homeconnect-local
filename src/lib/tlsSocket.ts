@@ -1,5 +1,4 @@
 import { EventEmitter } from "node:events";
-import tls from "node:tls";
 
 import WebSocket from "ws";
 
@@ -42,7 +41,7 @@ export class HomeConnectTlsSocket extends EventEmitter {
         maxVersion: "TLSv1.2",
         ciphers: "PSK:@SECLEVEL=0",
         checkServerIdentity: () => undefined,
-        pskCallback: (): tls.PSKCallbackNegotation => ({
+        pskCallback: () => ({
           identity: "iobroker-homeconnect-local",
           psk: this.psk,
         }),

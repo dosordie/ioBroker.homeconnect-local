@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type tls from "node:tls";
 
 import WebSocket from "ws";
 
@@ -17,6 +18,10 @@ export declare interface HomeConnectTlsSocket {
   emit<K extends keyof TlsSocketEvents>(event: K, ...args: TlsSocketEvents[K]): boolean;
 }
 
+type TlsPskWebSocketOptions = WebSocket.ClientOptions & tls.ConnectionOptions & {
+  pskCallback?: () => { identity: string; psk: Buffer };
+};
+
 export class HomeConnectTlsSocket extends EventEmitter {
   private readonly url: string;
   private readonly psk: Buffer;
@@ -34,19 +39,19 @@ export class HomeConnectTlsSocket extends EventEmitter {
 
   public async connect(timeoutMs = 15000): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(this.url, {
+      const options: TlsPskWebSocketOptions = {
         perMessageDeflate: false,
         rejectUnauthorized: false,
         minVersion: "TLSv1.2",
         maxVersion: "TLSv1.2",
         ciphers: "PSK:@SECLEVEL=0",
-        checkServerIdentity: () => undefined,
         pskCallback: () => ({
           identity: "iobroker-homeconnect-local",
           psk: this.psk,
         }),
-      } as WebSocket.ClientOptions);
+      };
 
+      const ws = new WebSocket(this.url, options);
       this.ws = ws;
 
       const timeout = setTimeout(() => {

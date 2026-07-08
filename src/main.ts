@@ -271,7 +271,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(`${baseId}.general.type`, "Type", "", "text");
     await this.ensureStateObject(`${baseId}.general.brand`, "Brand", "", "text");
     await this.ensureStateObject(`${baseId}.general.vib`, "VIB", "", "text");
-    await this.ensureStateObject(`${baseId}.general.mac", "MAC", "", "text");
+    await this.ensureStateObject(`${baseId}.general.mac`, "MAC", "", "text");
     await this.setState(`${baseId}.general.connected`, false, true);
     await this.setState(`${baseId}.general.name`, deviceName, true);
     await this.setState(`${baseId}.general.type`, String(profile.type ?? ""), true);

@@ -130,6 +130,14 @@ export class HomeConnectClient {
     }
   }
 
+  public async writeValue(uid: number, value: unknown): Promise<HcMessage> {
+    return this.sendSync({
+      resource: "/ro/values",
+      action: "PUT",
+      data: [{ uid, value }],
+    }, 20000);
+  }
+
   public async send(message: HcMessage): Promise<void> {
     const prepared = this.prepareMessage(message);
     const serialized = dumpMessage(prepared);

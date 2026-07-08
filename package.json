@@ -1,0 +1,48 @@
+{
+  "name": "iobroker.homeconnect-local",
+  "version": "0.0.1",
+  "description": "ioBroker adapter for local LAN monitoring of Bosch/Siemens/BSH Home Connect appliances",
+  "author": "dosordie",
+  "license": "MIT",
+  "main": "build/main.js",
+  "types": "build/main.d.ts",
+  "keywords": [
+    "ioBroker",
+    "homeconnect",
+    "home-connect",
+    "bosch",
+    "siemens",
+    "bsh",
+    "local",
+    "lan"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dosordie/ioBroker.homeconnect-local.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dosordie/ioBroker.homeconnect-local/issues"
+  },
+  "homepage": "https://github.com/dosordie/ioBroker.homeconnect-local#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "test": "npm run build"
+  },
+  "dependencies": {
+    "@iobroker/adapter-core": "^3.2.3",
+    "adm-zip": "^0.5.16",
+    "fast-xml-parser": "^4.5.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "^20.14.15",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.5.4",
+    "@iobroker/types": "^7.0.0"
+  }
+}

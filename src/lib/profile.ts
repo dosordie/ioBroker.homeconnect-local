@@ -147,7 +147,10 @@ export function parseFeatureMapping(featureMappingXml: string, deviceDescription
   return {
     featuresByUid: parseFeatureNames(featureMappingXml),
     enumTypeByUid: parseEnumTypeReferences(deviceDescriptionXml),
-    enumValuesByType: parseEnumValues(deviceDescriptionXml),
+    enumValuesByType: {
+      ...parseDeviceDescriptionEnumValues(deviceDescriptionXml),
+      ...parseFeatureMappingEnumValues(featureMappingXml),
+    },
   };
 }
 
@@ -189,7 +192,7 @@ function parseEnumTypeReferences(xml: string): Record<string, string> {
   return result;
 }
 
-function parseEnumValues(xml: string): Record<string, Record<string, string>> {
+function parseDeviceDescriptionEnumValues(xml: string): Record<string, Record<string, string>> {
   const result: Record<string, Record<string, string>> = {};
   const typeRegex = /<enumerationType\s+[^>]*enid="([0-9A-Fa-f]+)"[^>]*>([\s\S]*?)<\/enumerationType>/g;
 
@@ -213,6 +216,32 @@ function parseEnumValues(xml: string): Record<string, Record<string, string>> {
     }
 
     result[enumType] = values;
+  }
+
+  return result;
+}
+
+function parseFeatureMappingEnumValues(xml: string): Record<string, Record<string, string>> {
+  const result: Record<string, Record<string, string>> = {};
+  const typeRegex = /<enumDescription\s+[^>]*refENID="([0-9A-Fa-f]+)"[^>]*>([\s\S]*?)<\/enumDescription>/g;
+
+  for (const typeMatch of xml.matchAll(typeRegex)) {
+    const enumType = normalizeUid(typeMatch[1]);
+    if (!enumType) {
+      continue;
+    }
+
+    const values: Record<string, string> = {};
+    const body = typeMatch[2];
+    const memberRegex = /<enumMember\s+[^>]*refValue="([^"]+)"[^>]*>([^<]+)<\/enumMember>/g;
+
+    for (const valueMatch of body.matchAll(memberRegex)) {
+      values[valueMatch[1]] = valueMatch[2].trim();
+    }
+
+    if (Object.keys(values).length > 0) {
+      result[enumType] = values;
+    }
   }
 
   return result;

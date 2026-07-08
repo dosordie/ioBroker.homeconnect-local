@@ -1,6 +1,6 @@
 {
   "name": "iobroker.homeconnect-local",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "ioBroker adapter for local LAN monitoring of Bosch/Siemens/BSH Home Connect appliances",
   "author": "dosordie",
   "license": "MIT",
@@ -29,20 +29,20 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
     "watch": "tsc -p tsconfig.json --watch",
     "test": "npm run build"
   },
   "dependencies": {
     "@iobroker/adapter-core": "^3.2.3",
-    "adm-zip": "^0.5.16",
-    "fast-xml-parser": "^4.5.0",
-    "ws": "^8.18.0"
-  },
-  "devDependencies": {
+    "@iobroker/types": "^7.0.0",
     "@types/adm-zip": "^0.5.7",
     "@types/node": "^20.14.15",
     "@types/ws": "^8.5.12",
+    "adm-zip": "^0.5.16",
+    "fast-xml-parser": "^4.5.0",
     "typescript": "^5.5.4",
-    "@iobroker/types": "^7.0.0"
-  }
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {}
 }

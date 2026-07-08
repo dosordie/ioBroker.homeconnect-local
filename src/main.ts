@@ -191,18 +191,20 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private async persistNativeConfig(): Promise<void> {
     const instanceObjectId = `system.adapter.${this.namespace}`;
     const instanceObject = await this.getForeignObjectAsync(instanceObjectId);
-    if (!instanceObject) {
+    if (!instanceObject || instanceObject.type !== "instance") {
       this.log.warn(`Cannot persist device table, instance object ${instanceObjectId} not found`);
       return;
     }
 
+    const instanceNative = (instanceObject.native ?? {}) as Record<string, unknown>;
     await this.setForeignObjectAsync(instanceObjectId, {
       ...instanceObject,
+      type: "instance",
       native: {
-        ...(instanceObject.native ?? {}),
-        ...this.currentConfig,
+        ...instanceNative,
+        ...(this.currentConfig as Record<string, unknown>),
       },
-    });
+    } as ioBroker.InstanceObject);
   }
 
   private async ensureInfoConnectionObject(): Promise<void> {

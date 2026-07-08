@@ -33,7 +33,8 @@ export class StateMapper {
     }
 
     const featureName = this.profile.featureMapping.featuresByUid[uid] ?? `uid_${uid}`;
-    const stateName = sanitizeObjectId(lastMeaningfulNamePart(featureName));
+    const rawStateName = lastMeaningfulNamePart(featureName);
+    const stateName = sanitizeObjectId(this.stateNameFor(featureName, rawStateName));
     const category = this.categoryFor(featureName, stateName);
     const translatedValue = this.translateValue(uid, value.value);
     const id = `${category}.${stateName}`;
@@ -55,6 +56,14 @@ export class StateMapper {
     }
 
     return this.profile.featureMapping.featuresByUid[normalized];
+  }
+
+  private stateNameFor(featureName: string, rawStateName: string): string {
+    if (featureName.includes(".Root.")) {
+      return `Root${rawStateName}`;
+    }
+
+    return rawStateName;
   }
 
   private categoryFor(featureName: string, stateName: string): string {

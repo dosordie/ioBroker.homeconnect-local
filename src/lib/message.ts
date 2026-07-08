@@ -1,7 +1,5 @@
 import { HcMessage } from "./types";
 
-const OBJECT_DATA_RESOURCES = new Set(["/ro/activeProgram", "/ro/selectedProgram"]);
-
 export function parseMessage(payload: string): HcMessage {
   const parsed = JSON.parse(payload) as HcMessage;
   if (!parsed.action || !parsed.resource) {
@@ -20,11 +18,7 @@ export function dumpMessage(message: HcMessage): string {
   };
 
   if (message.data !== undefined && message.data !== null) {
-    payload.data = OBJECT_DATA_RESOURCES.has(message.resource ?? "")
-      ? message.data
-      : Array.isArray(message.data)
-        ? message.data
-        : [message.data];
+    payload.data = Array.isArray(message.data) ? message.data : [message.data];
   }
 
   if (message.code !== undefined) {

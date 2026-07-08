@@ -92,6 +92,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         writableUids: new Set<string>(),
         blockedCommands: [],
         stateValuesByFeature: new Map<string, ioBroker.StateValue>(),
+        rawValuesByFeature: new Map<string, unknown>(),
+        programExecutionByFeature: new Map<string, string>(),
       };
 
       this.devices.set(profile.haId, device);
@@ -356,9 +358,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       if (rawValue === undefined) return;
 
       if (writableState.kind === "startProgramWithOptions") {
-        await this.writeStartProgram(device, rawValue, await this.startOptionValuesFromState(device));
+        await this.writeStartProgram(device, rawValue, await this.startOptionValuesFromState(device, rawValue));
       } else if (writableState.kind === "startProgram" || writableState.kind === "startProgramName" || writableState.featureName === ACTIVE_PROGRAM_FEATURE) {
-        await this.writeStartProgram(device, rawValue, []);
+        if (writableState.kind === "startProgram") this.warnIfSelectedProgramNotSelectAndStart(device, rawValue);
+        await this.writeStartProgram(device, rawValue, this.buildAutomaticStartOptionValues(device, rawValue));
       } else if (writableState.featureName === SELECTED_PROGRAM_FEATURE) {
         await this.writeSelectedProgram(device, rawValue, []);
       } else {
@@ -414,9 +417,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     return stateValueToRaw(device.profile, writableState.uid, value);
   }
 
-  private async startOptionValuesFromState(device: RunningDevice): Promise<Array<{ uid: number; value: unknown }>> {
+  private async startOptionValuesFromState(device: RunningDevice, programRaw: unknown): Promise<Array<{ uid: number; value: unknown }>> {
     const optionsState = await this.getStateAsync(`${device.baseId}.program.startOptionsJson`);
-    return this.buildStartOptionValues(device, parseJsonObject(optionsState?.val));
+    const explicitOptions = this.buildStartOptionValues(device, parseJsonObject(optionsState?.val));
+    return this.mergeStartOptionValues(explicitOptions, this.buildAutomaticStartOptionValues(device, programRaw));
   }
 
   private async writeStartProgram(device: RunningDevice, selectedProgramRaw: unknown, options: Array<{ uid: number; value: unknown }>): Promise<void> {
@@ -456,6 +460,48 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       }
     }
     return result;
+  }
+
+
+  private buildAutomaticStartOptionValues(device: RunningDevice, programRaw: unknown): Array<{ uid: number; value: unknown }> {
+    const programUid = Number(programRaw);
+    const programKey = Number.isFinite(programUid) ? this.programKeyFromRawUid(device, programUid) : undefined;
+    const result: Array<{ uid: number; value: unknown }> = [];
+
+    for (const [uid, featureName] of Object.entries(device.profile.featureMapping.featuresByUid)) {
+      if (!featureName.includes(".Option.")) continue;
+      if (!device.writableUids.has(uid)) continue;
+      if (!device.rawValuesByFeature.has(featureName) && !device.stateValuesByFeature.has(featureName)) continue;
+
+      const numericUid = this.uidStringToNumber(uid);
+      if (numericUid === undefined) continue;
+      const stateValue = device.stateValuesByFeature.get(featureName);
+      const rawValue = device.rawValuesByFeature.has(featureName)
+        ? device.rawValuesByFeature.get(featureName)
+        : stateValue === undefined
+          ? undefined
+          : stateValueToRaw(device.profile, numericUid, stateValue);
+      if (rawValue !== undefined && rawValue !== null && rawValue !== "") result.push({ uid: numericUid, value: rawValue });
+    }
+
+    const optionList = result.map(option => `${option.uid}=${JSON.stringify(option.value)}`).join(", ") || "none";
+    this.log.debug(`${device.profile.haId}: start options for ${programUid}${programKey ? ` (${programKey})` : ""}: ${optionList}`);
+    return result;
+  }
+
+  private mergeStartOptionValues(explicitOptions: Array<{ uid: number; value: unknown }>, automaticOptions: Array<{ uid: number; value: unknown }>): Array<{ uid: number; value: unknown }> {
+    const explicitUids = new Set(explicitOptions.map(option => option.uid));
+    return [...explicitOptions, ...automaticOptions.filter(option => !explicitUids.has(option.uid))];
+  }
+
+  private warnIfSelectedProgramNotSelectAndStart(device: RunningDevice, programRaw: unknown): void {
+    const programUid = Number(programRaw);
+    const programKey = Number.isFinite(programUid) ? this.programKeyFromRawUid(device, programUid) : undefined;
+    if (!programKey) return;
+    const execution = device.programExecutionByFeature.get(programKey);
+    if (execution && execution !== "SELECTANDSTART") {
+      this.log.warn(`${device.profile.haId}: starting selected program ${programKey} although execution is ${execution}, expected SELECTANDSTART`);
+    }
   }
 
   private normalizeWrittenAckValue(writableState: WritableState, rawValue: unknown): ioBroker.StateValue {
@@ -534,6 +580,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       const uid = normalizeUid(value.uid);
       if (!uid) continue;
       const access = typeof value.access === "string" ? value.access : "";
+      const targetFeature = device.profile.featureMapping.featuresByUid[uid];
+      const execution = typeof value.execution === "string" ? value.execution : undefined;
+      if (execution && targetFeature?.includes(".Program.")) device.programExecutionByFeature.set(targetFeature, execution);
       if (access === "READWRITE") device.writableUids.add(uid);
       else if (access === "READ" || access === "NONE") device.writableUids.delete(uid);
       const target = device.mapper.toStateTarget({ uid, value: "" });
@@ -557,6 +606,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.setState(stateId, normalizedValue, true);
     await this.writeEnumCompanionStates(device, target);
     device.stateValuesByFeature.set(target.name, normalizedValue);
+    device.rawValuesByFeature.set(target.name, target.rawValue);
     await this.writeRootProgramAliasValues(device, target, normalizedValue);
     await this.writeStateMetadata(device, target, undefined, true, isWritable, value);
     if (isWritable) {

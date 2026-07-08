@@ -3,7 +3,8 @@ export async function ensureChannel(adapter: ioBroker.Adapter, id: string, name:
 }
 
 export async function ensureStateObject(adapter: ioBroker.Adapter, id: string, name: string, value: ioBroker.StateValue, role?: string, write = false, metadata: Partial<ioBroker.StateCommon> = {}): Promise<void> {
-  const type = typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string";
+  const valueType = typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string";
+  const type = write && valueType === "string" && hasNumericStateKeys(metadata.states) ? "mixed" : valueType;
   const desiredRole = role ?? (type === "boolean" ? "indicator" : "value");
   const sanitizedMetadata = sanitizeMetadataForType(metadata, type);
   const existing = await adapter.getObjectAsync(id);
@@ -37,6 +38,14 @@ function sanitizeMetadataForType(metadata: Partial<ioBroker.StateCommon>, type: 
 
   const { min: _min, max: _max, step: _step, ...rest } = metadata;
   return rest;
+}
+
+function hasNumericStateKeys(states: ioBroker.StateCommon["states"] | undefined): boolean {
+  if (!states || typeof states !== "object") {
+    return false;
+  }
+
+  return Object.keys(states).some(key => key.trim() !== "" && Number.isFinite(Number(key)));
 }
 
 function commonChanged(existing: ioBroker.StateCommon | undefined, metadata: Partial<ioBroker.StateCommon>): boolean {

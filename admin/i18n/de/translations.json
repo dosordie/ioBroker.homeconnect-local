@@ -1,0 +1,13 @@
+{
+  "Main settings": "Haupteinstellungen",
+  "Profile ZIP or directory path": "Profil-ZIP oder Verzeichnispfad",
+  "Absolute path to a profile ZIP created by homeconnect-profile-downloader or to a directory containing extracted profile JSON/XML files.": "Absoluter Pfad zu einem Profil-ZIP aus homeconnect-profile-downloader oder zu einem Verzeichnis mit entpackten Profil-JSON/XML-Dateien.",
+  "App name": "App-Name",
+  "App ID": "App-ID",
+  "Reconnect interval in seconds": "Reconnect-Intervall in Sekunden",
+  "Create raw uid states and log received /ro values": "Raw-UID-States anlegen und empfangene /ro-Werte loggen",
+  "Appliances": "Geräte",
+  "Enabled": "Aktiv",
+  "haId from profile": "haId aus Profil",
+  "IP or host": "IP oder Host"
+}

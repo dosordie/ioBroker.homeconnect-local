@@ -2,6 +2,7 @@ import { runHomeConnectHandshake } from "./clientHandshake";
 import { extractInitialMessageId, parseServiceVersions, serviceKeyForResource } from "./clientProtocol";
 import { dumpMessage, parseMessage } from "./message";
 import { PendingResponses } from "./pendingResponses";
+import { describeResponseCode } from "./responseCodes";
 import { createHomeConnectSocket } from "./socketFactory";
 import { HomeConnectSocketLike } from "./socket";
 import { ConnectionType, HcMessage } from "./types";
@@ -143,7 +144,7 @@ export class HomeConnectClient {
     const response = await responsePromise;
 
     if (response.code !== undefined && response.code !== 0) {
-      throw new Error(`Home Connect response code ${response.code} for ${response.resource}`);
+      throw new Error(`Home Connect response code ${response.code} (${describeResponseCode(response.code)}) for ${response.resource}`);
     }
 
     return response;

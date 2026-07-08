@@ -361,7 +361,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         this.log.info(`${device.profile.haId}: starting program by name = ${JSON.stringify(rawValue)}`);
         await device.client.writeValue(writableState.uid, rawValue);
       } else {
-        this.log.info(`${device.profile.haId}: writing ${writableState.featureName} = ${JSON.stringify(rawValue)}`);
+        const programKey = this.programKeyFromRaw(writableState, rawValue);
+        const programSuffix = programKey ? ` (${programKey})` : "";
+        this.log.info(`${device.profile.haId}: writing ${writableState.featureName} = ${JSON.stringify(rawValue)}${programSuffix}`);
         await device.client.writeValue(writableState.uid, rawValue);
       }
 
@@ -381,7 +383,12 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     if (writableState.kind === "startProgramName") return this.rawProgramForName(device, value);
     if (writableState.featureName === SELECTED_PROGRAM_FEATURE || writableState.featureName === ACTIVE_PROGRAM_FEATURE) {
       const key = this.programKeyForWrite(device, value, writableState.featureName);
-      return key === undefined ? undefined : stateValueToRaw(device.profile, writableState.uid, key);
+      if (key === undefined) return undefined;
+      const rawUid = this.rawProgramUidForKey(device, key);
+      if (rawUid === undefined) {
+        this.log.warn(`${device.profile.haId}: cannot resolve program ${JSON.stringify(value)} to raw UID, not writing`);
+      }
+      return rawUid;
     }
     if (writableState.kind === "startProgram" || writableState.kind === "startProgramWithOptions") {
       if (!isTruthyWrite(value)) return undefined;
@@ -608,7 +615,20 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private rawProgramForName(device: RunningDevice, value: ioBroker.StateValue): unknown {
     const key = this.programKeyForWrite(device, value, "start program by name");
     if (!key) return undefined;
-    return stateValueToRaw(device.profile, this.uidForFeature(device.profile, ACTIVE_PROGRAM_FEATURE) ?? 0, key);
+    const rawUid = this.rawProgramUidForKey(device, key);
+    if (rawUid === undefined) {
+      this.log.warn(`${device.profile.haId}: cannot resolve program ${JSON.stringify(value)} to raw UID, not writing`);
+    }
+    return rawUid;
+  }
+
+  private rawProgramUidForKey(device: RunningDevice, programKey: string): number | undefined {
+    const matchingUids = Object.entries(device.profile.featureMapping.featuresByUid)
+      .filter(([, featureName]) => featureName === programKey)
+      .map(([uid]) => Number.parseInt(uid, 16))
+      .filter(uid => Number.isFinite(uid));
+
+    return matchingUids.length === 1 ? matchingUids[0] : undefined;
   }
 
   private programDisplayName(device: RunningDevice, featureName: string): string {
@@ -626,7 +646,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const text = String(value ?? "").trim();
     const result = resolveProgramKeyForDevice(device, value);
     if (result.key) return result.key;
-    this.log.warn(`${device.profile.haId}: cannot ${context} ${JSON.stringify(text)}, ${result.matches.length === 0 ? "unknown" : "not unique"}`);
+    this.log.warn(`${device.profile.haId}: cannot resolve program ${JSON.stringify(text)} to raw UID, not writing (${context}, ${result.matches.length === 0 ? "unknown" : "not unique"})`);
     return undefined;
   }
 

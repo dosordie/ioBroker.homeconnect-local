@@ -2,9 +2,13 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.9",
+    "version": "0.0.10",
     "icon": "homeconnect-local.svg",
     "news": {
+      "0.0.10": {
+        "en": "Adds diagnostic states for appliance info, network info, service versions and registered apps/devices.",
+        "de": "Ergänzt Diagnose-States für Geräteinfos, Netzwerkinfos, Service-Versionen und registrierte Apps/Geräte."
+      },
       "0.0.9": {
         "en": "Adds cloud-adapter-like general.connected and device online indicator mapping.",
         "de": "Ergänzt cloud-adapterähnliches general.connected und Geräte-Online-Indicator-Mapping."

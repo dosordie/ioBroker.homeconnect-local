@@ -1,10 +1,9 @@
-import { HomeConnectAesSocket } from "./aesSocket";
 import { runHomeConnectHandshake } from "./clientHandshake";
 import { extractInitialMessageId, parseServiceVersions, serviceKeyForResource } from "./clientProtocol";
 import { dumpMessage, parseMessage } from "./message";
 import { PendingResponses } from "./pendingResponses";
+import { createHomeConnectSocket } from "./socketFactory";
 import { HomeConnectSocketLike } from "./socket";
-import { HomeConnectTlsSocket } from "./tlsSocket";
 import { ConnectionType, HcMessage } from "./types";
 
 export interface HomeConnectClientOptions {
@@ -34,15 +33,7 @@ export class HomeConnectClient {
   private connected = false;
 
   public constructor(options: HomeConnectClientOptions) {
-    if (options.connectionType === "TLS") {
-      this.socket = new HomeConnectTlsSocket(options.host, options.key);
-    } else {
-      if (!options.iv) {
-        throw new Error("AES connection requires an IV from the appliance profile");
-      }
-      this.socket = new HomeConnectAesSocket(options.host, options.key, options.iv);
-    }
-
+    this.socket = createHomeConnectSocket(options);
     this.appName = options.appName;
     this.appId = options.appId;
     this.log = options.log;

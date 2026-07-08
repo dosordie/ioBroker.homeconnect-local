@@ -1,51 +1,23 @@
 import * as utils from "@iobroker/adapter-core";
 
 import { HomeConnectClient } from "./lib/client";
+import {
+  ACTIVE_PROGRAM_FEATURE,
+  DANGEROUS_COMMAND_MARKERS,
+  FINISH_IN_FEATURE,
+  POWER_STATE_OFF,
+  POWER_STATE_ON,
+  POWER_STATE_UID,
+  POWER_STATE_UID_NUMBER,
+  SELECTED_PROGRAM_FEATURE,
+  START_IN_FEATURE,
+} from "./lib/constants";
 import { normalizeUid, sanitizeObjectId } from "./lib/ids";
 import { loadProfiles } from "./lib/profile";
+import { RunningDevice, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
+import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue, StateTarget } from "./lib/types";
-
-const POWER_STATE_UID = "021B";
-const POWER_STATE_UID_NUMBER = 0x021b;
-const POWER_STATE_OFF = 1;
-const POWER_STATE_ON = 2;
-const SELECTED_PROGRAM_FEATURE = "BSH.Common.Root.SelectedProgram";
-const ACTIVE_PROGRAM_FEATURE = "BSH.Common.Root.ActiveProgram";
-const START_IN_FEATURE = "BSH.Common.Option.StartInRelative";
-const FINISH_IN_FEATURE = "BSH.Common.Option.FinishInRelative";
-
-const DANGEROUS_COMMAND_MARKERS = [
-  "FactoryReset",
-  "NetworkReset",
-  "DeactivateWiFi",
-  "AllowSoftwareUpdate",
-  "AllowSoftwareDownload",
-  "SoftwareUpdate",
-  "SoftwareDownload",
-];
-
-interface RunningDevice {
-  baseId: string;
-  config: ConfiguredDevice;
-  profile: ApplianceProfile;
-  mapper: StateMapper;
-  client?: HomeConnectClient;
-  reconnectTimer?: NodeJS.Timeout;
-  reconnecting: boolean;
-  reconnectFailures: number;
-  writableUids: Set<string>;
-  blockedCommands: string[];
-  stateValuesByFeature: Map<string, ioBroker.StateValue>;
-}
-
-interface WritableState {
-  deviceHaId: string;
-  uid: number;
-  featureName: string;
-  kind: "value" | "command" | "startProgram" | "startProgramWithOptions";
-  stateId: string;
-}
 
 class HomeconnectLocalAdapter extends utils.Adapter {
   private devices = new Map<string, RunningDevice>();
@@ -398,9 +370,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async valueForWrite(device: RunningDevice, writableState: WritableState, value: ioBroker.StateValue): Promise<unknown> {
-    if (writableState.kind === "command") return this.isTruthyWrite(value) ? true : undefined;
+    if (writableState.kind === "command") return isTruthyWrite(value) ? true : undefined;
     if (writableState.kind === "startProgram" || writableState.kind === "startProgramWithOptions") {
-      if (!this.isTruthyWrite(value)) return undefined;
+      if (!isTruthyWrite(value)) return undefined;
       const selectedProgramUid = this.uidForFeature(device.profile, SELECTED_PROGRAM_FEATURE);
       if (selectedProgramUid === undefined) {
         this.log.warn(`${device.profile.haId}: cannot start program, SelectedProgram UID missing`);
@@ -414,16 +386,16 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         this.log.warn(`${device.profile.haId}: cannot start program, no selected program is known`);
         return undefined;
       }
-      return this.stateValueToRaw(device, selectedProgramUid, selectedProgramState.val);
+      return stateValueToRaw(device.profile, selectedProgramUid, selectedProgramState.val);
     }
-    if (writableState.uid === POWER_STATE_UID_NUMBER) return this.stateValueToPowerBoolean(value) ? POWER_STATE_ON : POWER_STATE_OFF;
-    return this.stateValueToRaw(device, writableState.uid, value);
+    if (writableState.uid === POWER_STATE_UID_NUMBER) return stateValueToPowerBoolean(value) ? POWER_STATE_ON : POWER_STATE_OFF;
+    return stateValueToRaw(device.profile, writableState.uid, value);
   }
 
   private async writeStartProgramWithOptions(device: RunningDevice, activeProgramUid: number, selectedProgramRaw: unknown): Promise<void> {
     if (!device.client) throw new Error("Device is not connected");
     const optionsState = await this.getStateAsync(`${device.baseId}.program.startOptionsJson`);
-    const options = this.parseStartOptions(optionsState?.val);
+    const options = parseJsonObject(optionsState?.val);
     const values = this.buildStartOptionValues(device, options);
     for (const entry of values) {
       this.log.info(`${device.profile.haId}: writing start option uid ${entry.uid} = ${JSON.stringify(entry.value)}`);
@@ -433,94 +405,28 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await device.client.writeValue(activeProgramUid, selectedProgramRaw);
   }
 
-  private parseStartOptions(value: ioBroker.StateValue | undefined): Record<string, unknown> {
-    if (value === undefined || value === null || value === "") return {};
-    if (typeof value === "object") return value as Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(String(value));
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-    } catch {
-      return {};
-    }
-  }
-
   private buildStartOptionValues(device: RunningDevice, options: Record<string, unknown>): Array<{ uid: number; value: unknown }> {
     const result: Array<{ uid: number; value: unknown }> = [];
     const add = (featureName: string, value: unknown): void => {
       const uid = this.uidForFeature(device.profile, featureName);
-      if (uid !== undefined && value !== undefined) result.push({ uid, value: this.stateValueToRaw(device, uid, this.toStateValue(value)) });
+      if (uid !== undefined && value !== undefined) result.push({ uid, value: stateValueToRaw(device.profile, uid, toStateValue(value)) });
     };
-    add(START_IN_FEATURE, this.durationToSeconds(options.start_in));
-    add(FINISH_IN_FEATURE, this.durationToSeconds(options.finish_in));
+    add(START_IN_FEATURE, durationToSeconds(options.start_in));
+    add(FINISH_IN_FEATURE, durationToSeconds(options.finish_in));
 
     const optionMap = options.options;
     if (optionMap && typeof optionMap === "object" && !Array.isArray(optionMap)) {
       for (const [key, value] of Object.entries(optionMap as Record<string, unknown>)) {
         const uid = this.uidForFeature(device.profile, key) ?? this.uidStringToNumber(key);
-        if (uid !== undefined) result.push({ uid, value: this.stateValueToRaw(device, uid, this.toStateValue(value)) });
+        if (uid !== undefined) result.push({ uid, value: stateValueToRaw(device.profile, uid, toStateValue(value)) });
       }
     }
     return result;
   }
 
-  private durationToSeconds(value: unknown): number | undefined {
-    if (value === undefined || value === null || value === "") return undefined;
-    if (typeof value === "number") return value;
-    if (typeof value === "object" && !Array.isArray(value)) {
-      const r = value as Record<string, unknown>;
-      return Number(r.hours ?? 0) * 3600 + Number(r.minutes ?? 0) * 60 + Number(r.seconds ?? 0);
-    }
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-
-  private toStateValue(value: unknown): ioBroker.StateValue {
-    if (value === null || value === undefined) return "";
-    if (typeof value === "boolean" || typeof value === "number" || typeof value === "string") return value;
-    return JSON.stringify(value);
-  }
-
   private normalizeWrittenAckValue(writableState: WritableState, rawValue: unknown): ioBroker.StateValue {
     if (writableState.uid === POWER_STATE_UID_NUMBER) return Number(rawValue) === POWER_STATE_ON;
-    return this.toStateValue(rawValue);
-  }
-
-  private stateValueToRaw(device: RunningDevice, uid: number, value: ioBroker.StateValue): unknown {
-    if (value === undefined || value === null) return undefined;
-    const normalizedUid = normalizeUid(uid);
-    if (!normalizedUid) return value;
-    if (typeof value === "boolean" || typeof value === "number") return value;
-    const text = String(value);
-    const numericText = Number(text);
-    if (text.trim() !== "" && Number.isFinite(numericText)) return numericText;
-    const enumType = device.profile.featureMapping.enumTypeByUid[normalizedUid];
-    if (enumType) {
-      const enumMap = device.profile.featureMapping.enumValuesByType[enumType] ?? {};
-      const lower = text.toLowerCase();
-      for (const [raw, label] of Object.entries(enumMap)) {
-        if (String(label).toLowerCase() === lower || String(label).split(".").pop()?.toLowerCase() === lower) {
-          const rawNumeric = Number(raw);
-          return Number.isFinite(rawNumeric) ? rawNumeric : raw;
-        }
-      }
-    }
-    const wanted = text.toLowerCase();
-    for (const [rawUid, featureName] of Object.entries(device.profile.featureMapping.featuresByUid)) {
-      const lastPart = featureName.split(".").pop()?.toLowerCase();
-      if (featureName.toLowerCase() === wanted || lastPart === wanted) return this.uidStringToNumber(rawUid) ?? rawUid;
-    }
-    return value;
-  }
-
-  private stateValueToPowerBoolean(value: ioBroker.StateValue): boolean {
-    if (value === true || value === 1) return true;
-    if (value === false || value === 0) return false;
-    const text = String(value).toLowerCase();
-    return text === "on" || text.endsWith(".on") || text === "true" || text === "1" || text === "ein";
-  }
-
-  private isTruthyWrite(value: ioBroker.StateValue): boolean {
-    return value === true || value === 1 || String(value).toLowerCase() === "true" || String(value).toLowerCase() === "1";
+    return toStateValue(rawValue);
   }
 
   private scheduleReconnect(device: RunningDevice, error?: Error): void {
@@ -714,7 +620,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private normalizeTargetValue(target: StateTarget): ioBroker.StateValue {
     if (target.uid === POWER_STATE_UID) return Number(target.rawValue) === POWER_STATE_ON;
-    return this.toStateValue(target.value);
+    return toStateValue(target.value);
   }
 
   private firstRecord(data: unknown): Record<string, unknown> | undefined {

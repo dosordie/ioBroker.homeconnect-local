@@ -67,8 +67,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.subscribeStatesAsync("*.settings.*");
     await this.subscribeStatesAsync("*.options.*");
     await this.subscribeStatesAsync("*.commands.*");
-    await this.subscribeStatesAsync("*.program.SelectedProgram");
-    await this.subscribeStatesAsync("*.program.startOptionsJson");
+    await this.subscribeStatesAsync("*.program.*");
 
     const profilePath = this.currentConfig.profilePath?.trim();
     if (!profilePath) {
@@ -251,6 +250,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
     await this.ensureDiagnosticStates(device);
     await this.ensureProgramStates(device);
+    await this.prepareRootProgramAliasObjects(device);
 
     await this.ensureStateObject(`${baseId}.settings.PowerState`, "BSH.Common.Setting.PowerState", false, "switch", true);
     this.registerWritableState(device, `${baseId}.settings.PowerState`, POWER_STATE_UID_NUMBER, "BSH.Common.Setting.PowerState", "value");
@@ -280,6 +280,20 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(`${device.baseId}.program.startOptionsJson`, "Start options JSON", "{}", "json", true);
     await this.ensureStateObject(`${device.baseId}.programs.availableList`, "Available programs list", "", "text");
     await this.ensureStateObject(`${device.baseId}.programs.availableJson`, "Available programs JSON", "", "json");
+  }
+
+  private async prepareRootProgramAliasObjects(device: RunningDevice): Promise<void> {
+    const selectedUid = this.uidForFeature(device.profile, SELECTED_PROGRAM_FEATURE);
+    if (selectedUid !== undefined) {
+      await this.ensureStateObject(`${device.baseId}.program.RootSelectedProgram`, SELECTED_PROGRAM_FEATURE, "", "value", true);
+      this.registerWritableState(device, `${device.baseId}.program.RootSelectedProgram`, selectedUid, SELECTED_PROGRAM_FEATURE, "value");
+    }
+
+    const activeUid = this.uidForFeature(device.profile, ACTIVE_PROGRAM_FEATURE);
+    if (activeUid !== undefined) {
+      await this.ensureStateObject(`${device.baseId}.program.RootActiveProgram`, ACTIVE_PROGRAM_FEATURE, "", "value", true);
+      this.registerWritableState(device, `${device.baseId}.program.RootActiveProgram`, activeUid, ACTIVE_PROGRAM_FEATURE, "value");
+    }
   }
 
   private async prepareCommandObjects(device: RunningDevice): Promise<void> {
@@ -392,7 +406,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         this.log.warn(`${device.profile.haId}: cannot start program, SelectedProgram UID missing`);
         return undefined;
       }
-      const selectedProgramState = await this.getStateAsync(`${device.baseId}.program.SelectedProgram`);
+      let selectedProgramState = await this.getStateAsync(`${device.baseId}.program.SelectedProgram`);
+      if (selectedProgramState?.val === undefined || selectedProgramState.val === null || selectedProgramState.val === "") {
+        selectedProgramState = await this.getStateAsync(`${device.baseId}.program.RootSelectedProgram`);
+      }
       if (selectedProgramState?.val === undefined || selectedProgramState.val === null || selectedProgramState.val === "") {
         this.log.warn(`${device.profile.haId}: cannot start program, no selected program is known`);
         return undefined;
@@ -621,6 +638,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.ensureStateObject(stateId, target.name, target.uid === POWER_STATE_UID ? false : "", target.uid === POWER_STATE_UID ? "switch" : undefined, writable);
       await this.writeStateMetadata(device, target, access, value.available !== false, writable, value.raw ?? value);
       if (writable) this.registerWritableState(device, stateId, this.uidStringToNumber(uid) ?? Number(uid), target.name, "value");
+      if (target.name === SELECTED_PROGRAM_FEATURE || target.name === ACTIVE_PROGRAM_FEATURE) await this.prepareRootProgramAliasObjects(device);
     }
   }
 
@@ -633,6 +651,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(stateId, target.name, normalizedValue, target.uid === POWER_STATE_UID ? "switch" : undefined, isWritable);
     await this.setState(stateId, normalizedValue, true);
     device.stateValuesByFeature.set(target.name, normalizedValue);
+    await this.writeRootProgramAliasValues(device, target, normalizedValue);
     await this.writeStateMetadata(device, target, undefined, true, isWritable, value);
     if (isWritable) {
       const numericUid = this.uidStringToNumber(target.uid);
@@ -643,6 +662,11 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.setState(`${device.baseId}.raw.uid_${target.uid}`, JSON.stringify(value), true);
     }
     if (target.name.includes(".Program.") || target.name.includes(".Setting.Favorite.")) await this.updateProgramList(device);
+  }
+
+  private async writeRootProgramAliasValues(device: RunningDevice, target: StateTarget, value: ioBroker.StateValue): Promise<void> {
+    if (target.name === SELECTED_PROGRAM_FEATURE) await this.setState(`${device.baseId}.program.RootSelectedProgram`, value, true);
+    if (target.name === ACTIVE_PROGRAM_FEATURE) await this.setState(`${device.baseId}.program.RootActiveProgram`, value, true);
   }
 
   private async writeStateMetadata(device: RunningDevice, target: StateTarget, access: string | undefined, available: boolean, writable: boolean, raw: unknown): Promise<void> {
@@ -680,6 +704,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private canWriteTarget(device: RunningDevice, target: StateTarget): boolean {
     if (target.uid === POWER_STATE_UID) return true;
     if (target.name === SELECTED_PROGRAM_FEATURE) return true;
+    if (target.name === ACTIVE_PROGRAM_FEATURE) return true;
     return device.writableUids.has(target.uid) && (target.category === "settings" || target.category === "options" || target.category === "program");
   }
 

@@ -123,6 +123,28 @@ export class HomeConnectClient {
     }, 20000);
   }
 
+  public async selectProgram(programUid: number, options: Array<{ uid: number; value: unknown }> = []): Promise<HcMessage> {
+    return this.sendSync({
+      resource: "/ro/selectedProgram",
+      action: "POST",
+      data: {
+        program: programUid,
+        options,
+      },
+    }, 20000);
+  }
+
+  public async startProgram(programUid: number, options: Array<{ uid: number; value: unknown }> = []): Promise<HcMessage> {
+    return this.sendSync({
+      resource: "/ro/activeProgram",
+      action: "POST",
+      data: {
+        program: programUid,
+        options,
+      },
+    }, 20000);
+  }
+
   public async send(message: HcMessage): Promise<void> {
     const prepared = this.prepareMessage(message);
     const serialized = dumpMessage(prepared);

@@ -361,6 +361,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         await this.writeStartProgram(device, rawValue, await this.startOptionValuesFromState(device, rawValue));
       } else if (writableState.kind === "startProgram" || writableState.kind === "startProgramName" || writableState.featureName === ACTIVE_PROGRAM_FEATURE) {
         if (writableState.kind === "startProgram") this.warnIfSelectedProgramNotSelectAndStart(device, rawValue);
+        else this.warnIfDirectProgramNotSelectAndStart(device, rawValue);
         await this.writeStartProgram(device, rawValue, this.buildAutomaticStartOptionValues(device, rawValue));
       } else if (writableState.featureName === SELECTED_PROGRAM_FEATURE) {
         await this.writeSelectedProgram(device, rawValue, []);
@@ -466,26 +467,33 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private buildAutomaticStartOptionValues(device: RunningDevice, programRaw: unknown): Array<{ uid: number; value: unknown }> {
     const programUid = Number(programRaw);
     const programKey = Number.isFinite(programUid) ? this.programKeyFromRawUid(device, programUid) : undefined;
+    const programUidKey = Number.isFinite(programUid) ? normalizeUid(programUid) : undefined;
+    const programOptions = programUidKey ? device.profile.featureMapping.programOptionsByUid[programUidKey] : undefined;
     const result: Array<{ uid: number; value: unknown }> = [];
 
-    for (const [uid, featureName] of Object.entries(device.profile.featureMapping.featuresByUid)) {
-      if (!featureName.includes(".Option.")) continue;
-      if (!device.writableUids.has(uid)) continue;
-      if (!device.rawValuesByFeature.has(featureName) && !device.stateValuesByFeature.has(featureName)) continue;
+    if (programOptions) {
+      for (const programOption of programOptions) {
+        const uid = programOption.refUID;
+        if (!device.writableUids.has(uid)) continue;
+        const featureName = device.profile.featureMapping.featuresByUid[uid];
+        if (!featureName || !featureName.includes(".Option.")) continue;
+        if (!device.rawValuesByFeature.has(featureName) && !device.stateValuesByFeature.has(featureName)) continue;
 
-      const numericUid = this.uidStringToNumber(uid);
-      if (numericUid === undefined) continue;
-      const stateValue = device.stateValuesByFeature.get(featureName);
-      const rawValue = device.rawValuesByFeature.has(featureName)
-        ? device.rawValuesByFeature.get(featureName)
-        : stateValue === undefined
-          ? undefined
-          : stateValueToRaw(device.profile, numericUid, stateValue);
-      if (rawValue !== undefined && rawValue !== null && rawValue !== "") result.push({ uid: numericUid, value: rawValue });
+        const numericUid = this.uidStringToNumber(uid);
+        if (numericUid === undefined) continue;
+        const stateValue = device.stateValuesByFeature.get(featureName);
+        const rawValue = device.rawValuesByFeature.has(featureName)
+          ? device.rawValuesByFeature.get(featureName)
+          : stateValue === undefined
+            ? undefined
+            : stateValueToRaw(device.profile, numericUid, stateValue);
+        if (rawValue !== undefined && rawValue !== null && rawValue !== "") result.push({ uid: numericUid, value: rawValue });
+      }
     }
 
     const optionList = result.map(option => `${option.uid}=${JSON.stringify(option.value)}`).join(", ") || "none";
-    this.log.debug(`${device.profile.haId}: start options for ${programUid}${programKey ? ` (${programKey})` : ""}: ${optionList}`);
+    const source = programOptions ? "program-specific" : "unknown (empty)";
+    this.log.debug(`${device.profile.haId}: start options for ${programUid}${programKey ? ` (${programKey})` : ""}: ${optionList}; automatic options source: ${source}`);
     return result;
   }
 
@@ -495,12 +503,20 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private warnIfSelectedProgramNotSelectAndStart(device: RunningDevice, programRaw: unknown): void {
+    this.warnIfProgramNotSelectAndStart(device, programRaw, "starting selected program");
+  }
+
+  private warnIfDirectProgramNotSelectAndStart(device: RunningDevice, programRaw: unknown): void {
+    this.warnIfProgramNotSelectAndStart(device, programRaw, "directly starting program");
+  }
+
+  private warnIfProgramNotSelectAndStart(device: RunningDevice, programRaw: unknown, action: string): void {
     const programUid = Number(programRaw);
     const programKey = Number.isFinite(programUid) ? this.programKeyFromRawUid(device, programUid) : undefined;
     if (!programKey) return;
     const execution = device.programExecutionByFeature.get(programKey);
     if (execution && execution !== "SELECTANDSTART") {
-      this.log.warn(`${device.profile.haId}: starting selected program ${programKey} although execution is ${execution}, expected SELECTANDSTART`);
+      this.log.warn(`${device.profile.haId}: ${action} ${programKey} although execution is ${execution}, expected SELECTANDSTART`);
     }
   }
 

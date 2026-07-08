@@ -76,8 +76,14 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
 
     this.log.info(`Loaded ${profiles.length} Home Connect profile(s) from ${profilePath}`);
+    await this.syncConfiguredDevicesWithProfiles(profiles);
+
     const profilesByHaId = new Map(profiles.map(profile => [profile.haId, profile]));
     const configuredDevices = this.currentConfig.devices ?? [];
+
+    for (const profile of profiles) {
+      this.log.info(`${profile.haId}: profile found (${this.profileDisplayName(profile)}, ${profile.connectionType})`);
+    }
 
     for (const configuredDevice of configuredDevices) {
       if (!configuredDevice.enabled) {
@@ -111,6 +117,94 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
   }
 
+  private async syncConfiguredDevicesWithProfiles(profiles: ApplianceProfile[]): Promise<void> {
+    if (this.currentConfig.autoAddProfiles === false) {
+      return;
+    }
+
+    const existingDevices = this.currentConfig.devices ?? [];
+    const devicesByHaId = new Map(existingDevices.filter(device => device.haId).map(device => [device.haId as string, { ...device }]));
+    let changed = false;
+
+    for (const profile of profiles) {
+      const existing = devicesByHaId.get(profile.haId);
+      const metadata = this.profileToDeviceConfig(profile);
+
+      if (!existing) {
+        devicesByHaId.set(profile.haId, metadata);
+        changed = true;
+        this.log.info(`${profile.haId}: added profile to adapter config as disabled device suggestion`);
+        continue;
+      }
+
+      const enriched: ConfiguredDevice = {
+        ...existing,
+        name: existing.name || metadata.name,
+        type: metadata.type,
+        brand: metadata.brand,
+        vib: metadata.vib,
+        mac: metadata.mac,
+        connectionType: metadata.connectionType,
+        profileFile: metadata.profileFile,
+      };
+
+      if (JSON.stringify(enriched) !== JSON.stringify(existing)) {
+        devicesByHaId.set(profile.haId, enriched);
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    const orderedDevices = Array.from(devicesByHaId.values()).sort((a, b) => String(a.name ?? a.haId).localeCompare(String(b.name ?? b.haId)));
+    this.currentConfig = {
+      ...this.currentConfig,
+      devices: orderedDevices,
+    };
+
+    await this.persistNativeConfig();
+    this.log.info("Updated adapter device table from scanned Home Connect profiles. Refresh the admin page to see new devices.");
+  }
+
+  private profileToDeviceConfig(profile: ApplianceProfile): ConfiguredDevice {
+    return {
+      enabled: false,
+      haId: profile.haId,
+      host: "",
+      name: this.profileDisplayName(profile),
+      type: profile.type,
+      brand: profile.brand,
+      vib: profile.vib,
+      mac: profile.mac,
+      connectionType: String(profile.connectionType),
+      profileFile: profile.profileFile,
+    };
+  }
+
+  private profileDisplayName(profile: ApplianceProfile): string {
+    const parts = [profile.brand, profile.vib, profile.type].filter(Boolean);
+    return parts.length > 0 ? parts.join(" ") : profile.haId;
+  }
+
+  private async persistNativeConfig(): Promise<void> {
+    const instanceObjectId = `system.adapter.${this.namespace}`;
+    const instanceObject = await this.getForeignObjectAsync(instanceObjectId);
+    if (!instanceObject) {
+      this.log.warn(`Cannot persist device table, instance object ${instanceObjectId} not found`);
+      return;
+    }
+
+    await this.setForeignObjectAsync(instanceObjectId, {
+      ...instanceObject,
+      native: {
+        ...(instanceObject.native ?? {}),
+        ...this.currentConfig,
+      },
+    });
+  }
+
   private async ensureInfoConnectionObject(): Promise<void> {
     await this.ensureStateObject("info.connection", "If connected to at least one appliance", false, "indicator.connected");
   }
@@ -121,14 +215,16 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.setObjectNotExistsAsync(baseId, {
       type: "device",
       common: {
-        name: `${profile.brand ?? "BSH"} ${profile.vib ?? profile.type}`,
+        name: config.name || `${profile.brand ?? "BSH"} ${profile.vib ?? profile.type}`,
       },
       native: {
         haId: profile.haId,
         type: profile.type,
+        brand: profile.brand,
         vib: profile.vib,
         mac: profile.mac,
         connectionType: profile.connectionType,
+        profileFile: profile.profileFile,
         host: config.host,
       },
     });

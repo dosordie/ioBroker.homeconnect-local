@@ -133,7 +133,7 @@ export class HomeConnectClient {
   public async writeValue(uid: number, value: unknown): Promise<HcMessage> {
     return this.sendSync({
       resource: "/ro/values",
-      action: "PUT",
+      action: "POST",
       data: [{ uid, value }],
     }, 20000);
   }

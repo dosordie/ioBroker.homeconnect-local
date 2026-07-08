@@ -1,0 +1,32 @@
+name: ioBroker Adapter Check
+
+on:
+  pull_request:
+    branches:
+      - main
+      - work
+  workflow_dispatch:
+
+jobs:
+  adapter-check:
+    name: Adapter checker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Run ioBroker adapter checker
+        run: npx @iobroker/adapter-check

@@ -1,6 +1,6 @@
 {
   "name": "iobroker.homeconnect-local",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "ioBroker adapter for local LAN monitoring of Bosch/Siemens/BSH Home Connect appliances",
   "author": "dosordie",
   "license": "MIT",

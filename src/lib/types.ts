@@ -25,6 +25,7 @@ export interface ApplianceProfile {
   connectionType: ConnectionType | string;
   key: string;
   iv?: string;
+  profileFile?: string;
   featureMapping: FeatureMapping;
 }
 
@@ -38,6 +39,13 @@ export interface ConfiguredDevice {
   enabled?: boolean;
   haId?: string;
   host?: string;
+  name?: string;
+  type?: string;
+  brand?: string;
+  vib?: string;
+  mac?: string;
+  connectionType?: string;
+  profileFile?: string;
 }
 
 export interface AdapterNativeConfig {
@@ -46,6 +54,7 @@ export interface AdapterNativeConfig {
   appId?: string;
   reconnectInterval?: number;
   debugRaw?: boolean;
+  autoAddProfiles?: boolean;
   devices?: ConfiguredDevice[];
 }
 

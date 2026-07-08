@@ -21,6 +21,7 @@ interface RunningDevice {
   client?: HomeConnectClient;
   reconnectTimer?: NodeJS.Timeout;
   reconnecting: boolean;
+  reconnectFailures: number;
   writableUids: Set<string>;
 }
 
@@ -108,6 +109,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         profile,
         mapper: new StateMapper(profile),
         reconnecting: false,
+        reconnectFailures: 0,
         writableUids: new Set<string>(),
       };
 
@@ -188,6 +190,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     return parts.length > 0 ? parts.join(" ") : profile.haId;
   }
 
+  private deviceDisplayName(profile: ApplianceProfile, config: ConfiguredDevice): string {
+    return config.name || this.profileDisplayName(profile);
+  }
+
   private async persistNativeConfig(): Promise<void> {
     const instanceObjectId = `system.adapter.${this.namespace}`;
     const instanceObject = await this.getForeignObjectAsync(instanceObjectId);
@@ -213,11 +219,15 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private async prepareDeviceObjects(device: RunningDevice): Promise<void> {
     const { baseId, profile, config } = device;
+    const deviceName = this.deviceDisplayName(profile, config);
 
     await this.setObjectNotExistsAsync(baseId, {
       type: "device",
       common: {
-        name: config.name || `${profile.brand ?? "BSH"} ${profile.vib ?? profile.type}`,
+        name: deviceName,
+        statusStates: {
+          onlineId: `${this.namespace}.${baseId}.general.connected`,
+        },
       },
       native: {
         haId: profile.haId,
@@ -231,6 +241,44 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       },
     });
 
+    await this.extendObjectAsync(baseId, {
+      common: {
+        name: deviceName,
+        statusStates: {
+          onlineId: `${this.namespace}.${baseId}.general.connected`,
+        },
+      },
+      native: {
+        haId: profile.haId,
+        type: profile.type,
+        brand: profile.brand,
+        vib: profile.vib,
+        mac: profile.mac,
+        connectionType: profile.connectionType,
+        profileFile: profile.profileFile,
+        host: config.host,
+      },
+    });
+
+    await this.setObjectNotExistsAsync(`${baseId}.general`, {
+      type: "channel",
+      common: { name: "General Information" },
+      native: {},
+    });
+
+    await this.ensureStateObject(`${baseId}.general.connected`, "Connected", false, "indicator.connected");
+    await this.ensureStateObject(`${baseId}.general.name`, "Name", "", "text");
+    await this.ensureStateObject(`${baseId}.general.type`, "Type", "", "text");
+    await this.ensureStateObject(`${baseId}.general.brand`, "Brand", "", "text");
+    await this.ensureStateObject(`${baseId}.general.vib`, "VIB", "", "text");
+    await this.ensureStateObject(`${baseId}.general.mac", "MAC", "", "text");
+    await this.setState(`${baseId}.general.connected`, false, true);
+    await this.setState(`${baseId}.general.name`, deviceName, true);
+    await this.setState(`${baseId}.general.type`, String(profile.type ?? ""), true);
+    await this.setState(`${baseId}.general.brand`, String(profile.brand ?? ""), true);
+    await this.setState(`${baseId}.general.vib`, String(profile.vib ?? ""), true);
+    await this.setState(`${baseId}.general.mac`, String(profile.mac ?? ""), true);
+
     await this.setObjectNotExistsAsync(`${baseId}.info`, {
       type: "channel",
       common: { name: "Information" },
@@ -238,6 +286,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     });
 
     await this.ensureStateObject(`${baseId}.info.connected`, "Connected", false, "indicator.connected");
+    await this.ensureStateObject(`${baseId}.info.reconnecting`, "Reconnect in progress", false, "indicator");
+    await this.ensureStateObject(`${baseId}.info.lastSeen`, "Last successful contact", "", "date");
+    await this.ensureStateObject(`${baseId}.info.lastError`, "Last connection error", "", "text");
     await this.ensureStateObject(`${baseId}.info.lastMessage`, "Last raw Home Connect message", "", "json");
     await this.ensureStateObject(`${baseId}.info.connectionType`, "Connection type", "", "text");
     await this.setState(`${baseId}.info.connectionType`, String(profile.connectionType), true);
@@ -300,7 +351,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       return;
     }
 
-    this.log.info(`${device.profile.haId}: connecting to ${device.config.host} via ${device.profile.connectionType}`);
+    this.log.debug(`${device.profile.haId}: connecting to ${device.config.host} via ${device.profile.connectionType}`);
 
     const client = new HomeConnectClient({
       host: device.config.host as string,
@@ -318,15 +369,13 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     try {
       await client.connect();
-      await this.setState(`${device.baseId}.info.connected`, true, true);
-      await this.updateGlobalConnectionState();
+      await this.setDeviceConnectionState(device, true);
       this.log.info(`${device.profile.haId}: connected`);
       await client.readInitialValues();
     } catch (error) {
       await client.close().catch(closeError => this.log.debug(`Close after failed connect failed: ${String(closeError)}`));
-      await this.setState(`${device.baseId}.info.connected`, false, true);
-      await this.updateGlobalConnectionState();
-      this.log.warn(`${device.profile.haId}: connection failed: ${String(error)}`);
+      await this.setDeviceConnectionState(device, false, error);
+      this.logConnectionFailure(device, error);
       this.scheduleReconnect(device, error instanceof Error ? error : new Error(String(error)));
     }
   }
@@ -487,21 +536,57 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
 
     if (error) {
-      this.log.warn(`${device.profile.haId}: scheduling reconnect after error: ${error.message}`);
+      void this.setState(`${device.baseId}.info.lastError`, error.message, true);
     }
 
     device.reconnecting = true;
-    void this.setState(`${device.baseId}.info.connected`, false, true);
+    void this.setState(`${device.baseId}.info.reconnecting`, true, true);
     void this.updateGlobalConnectionState();
 
     const seconds = Math.max(5, Number(this.currentConfig.reconnectInterval ?? 30));
     device.reconnectTimer = setTimeout(() => {
       device.reconnecting = false;
+      void this.setState(`${device.baseId}.info.reconnecting`, false, true);
       void this.connectDevice(device);
     }, seconds * 1000);
   }
 
+  private logConnectionFailure(device: RunningDevice, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    device.reconnectFailures += 1;
+
+    if (device.reconnectFailures === 1) {
+      this.log.warn(`${device.profile.haId}: connection failed: ${message}`);
+      return;
+    }
+
+    this.log.debug(`${device.profile.haId}: still offline, retrying: ${message}`);
+  }
+
+  private async setDeviceConnectionState(device: RunningDevice, connected: boolean, error?: unknown): Promise<void> {
+    await this.setState(`${device.baseId}.info.connected`, connected, true);
+    await this.setState(`${device.baseId}.general.connected`, connected, true);
+    await this.setState(`${device.baseId}.info.reconnecting`, false, true);
+
+    if (connected) {
+      device.reconnecting = false;
+      device.reconnectFailures = 0;
+      await this.setState(`${device.baseId}.info.lastSeen`, new Date().toISOString(), true);
+      await this.setState(`${device.baseId}.info.lastError`, "", true);
+    } else if (error !== undefined) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.setState(`${device.baseId}.info.lastError`, message, true);
+    }
+
+    await this.updateGlobalConnectionState();
+  }
+
+  private async touchLastSeen(device: RunningDevice): Promise<void> {
+    await this.setState(`${device.baseId}.info.lastSeen`, new Date().toISOString(), true);
+  }
+
   private async handleDeviceMessage(device: RunningDevice, message: HcMessage): Promise<void> {
+    await this.touchLastSeen(device);
     await this.ensureStateObject(`${device.baseId}.info.lastMessage`, "Last raw Home Connect message", "", "json");
     await this.setState(`${device.baseId}.info.lastMessage`, JSON.stringify(message), true);
 
@@ -674,7 +759,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private async updateGlobalConnectionState(): Promise<void> {
     for (const device of this.devices.values()) {
-      const state = await this.getStateAsync(`${device.baseId}.info.connected`);
+      const state = await this.getStateAsync(`${device.baseId}.general.connected`);
       if (state?.val === true) {
         await this.setState("info.connection", true, true);
         return;
@@ -693,7 +778,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
           clearTimeout(device.reconnectTimer);
         }
 
-        await this.setState(`${device.baseId}.info.connected`, false, true);
+        await this.setDeviceConnectionState(device, false);
         await device.client?.close();
       }
 

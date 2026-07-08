@@ -1,13 +1,22 @@
 {
   "Main settings": "Main settings",
-  "Profile ZIP or directory path": "Profile ZIP or directory path",
-  "Absolute path to a profile ZIP created by homeconnect-profile-downloader or to a directory containing extracted profile JSON/XML files.": "Absolute path to a profile ZIP created by homeconnect-profile-downloader or to a directory containing extracted profile JSON/XML files.",
+  "Profile directory path": "Profile directory path",
+  "Absolute container path to a directory containing Home Connect profile ZIP files. A single ZIP or extracted profile directory is still supported.": "Absolute container path to a directory containing Home Connect profile ZIP files. A single ZIP or extracted profile directory is still supported.",
+  "Automatically add scanned profiles to the device table": "Automatically add scanned profiles to the device table",
+  "New profiles are added as disabled device suggestions. Existing enabled, host and haId values are preserved.": "New profiles are added as disabled device suggestions. Existing enabled, host and haId values are preserved.",
   "App name": "App name",
   "App ID": "App ID",
   "Reconnect interval in seconds": "Reconnect interval in seconds",
   "Create raw uid states and log received /ro values": "Create raw uid states and log received /ro values",
   "Appliances": "Appliances",
+  "Profiles found in the profile directory are added automatically as disabled suggestions. Enable a row and enter the appliance IP or hostname.": "Profiles found in the profile directory are added automatically as disabled suggestions. Enable a row and enter the appliance IP or hostname.",
   "Enabled": "Enabled",
+  "Name": "Name",
+  "IP or host": "IP or host",
   "haId from profile": "haId from profile",
-  "IP or host": "IP or host"
+  "Type": "Type",
+  "Brand": "Brand",
+  "VIB": "VIB",
+  "Connection": "Connection",
+  "Profile file": "Profile file"
 }

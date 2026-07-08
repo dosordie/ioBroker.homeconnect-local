@@ -2,19 +2,28 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.3",
+    "version": "0.0.6",
+    "icon": "homeconnect-local.png",
     "news": {
+      "0.0.6": {
+        "en": "Adds generic local write states, post-install restart helper and adapter logo.",
+        "de": "Ergänzt generische lokale Schreib-States, Install-Restart-Helfer und Adapter-Logo."
+      },
+      "0.0.5": {
+        "en": "Adds first writable PowerState support.",
+        "de": "Ergänzt erste schreibbare PowerState-Unterstützung."
+      },
       "0.0.3": {
-        "en": "Fixes config loading after adapter startup and improves first local dishwasher test handling.",
-        "de": "Korrigiert das Laden der Konfiguration nach Adapterstart und verbessert den ersten lokalen Geschirrspüler-Test."
+        "en": "Fixes config loading after adapter startup.",
+        "de": "Korrigiert das Laden der Konfiguration nach Adapterstart."
       },
       "0.0.2": {
         "en": "Adds experimental TLS-PSK transport and build support for GitHub installation.",
         "de": "Ergänzt experimentellen TLS-PSK-Transport und Build-Unterstützung für GitHub-Installation."
       },
       "0.0.1": {
-        "en": "Initial read-only proof of concept for AES based Home Connect Local devices.",
-        "de": "Erster Read-only-Proof-of-Concept für AES-basierte Home-Connect-Local-Geräte."
+        "en": "Initial read-only proof of concept.",
+        "de": "Erster Read-only-Proof-of-Concept."
       }
     },
     "titleLang": {
@@ -25,18 +34,8 @@
       "en": "Local LAN monitoring for Bosch/Siemens/BSH Home Connect appliances without using the cloud API during runtime.",
       "de": "Lokales LAN-Monitoring für Bosch/Siemens/BSH Home-Connect-Geräte ohne Cloud-API im laufenden Betrieb."
     },
-    "authors": [
-      "dosordie"
-    ],
-    "keywords": [
-      "homeconnect",
-      "home-connect",
-      "bosch",
-      "siemens",
-      "bsh",
-      "local",
-      "lan"
-    ],
+    "authors": ["dosordie"],
+    "keywords": ["homeconnect", "home-connect", "bosch", "siemens", "bsh", "local", "lan"],
     "license": "MIT",
     "platform": "Javascript/Node.js",
     "mode": "daemon",
@@ -47,19 +46,9 @@
     "compact": true,
     "connectionType": "local",
     "dataSource": "push",
-    "adminUI": {
-      "config": "json"
-    },
-    "dependencies": [
-      {
-        "js-controller": ">=5.0.0"
-      }
-    ],
-    "globalDependencies": [
-      {
-        "admin": ">=6.0.0"
-      }
-    ]
+    "adminUI": {"config": "json"},
+    "dependencies": [{"js-controller": ">=5.0.0"}],
+    "globalDependencies": [{"admin": ">=6.0.0"}]
   },
   "native": {
     "profilePath": "",

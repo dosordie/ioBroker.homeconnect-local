@@ -53,6 +53,7 @@ export class HomeConnectTlsSocket extends EventEmitter {
 
       const ws = new WebSocket(this.url, options);
       this.ws = ws;
+      let settled = false;
 
       const timeout = setTimeout(() => {
         cleanup();
@@ -63,24 +64,31 @@ export class HomeConnectTlsSocket extends EventEmitter {
       const cleanup = (): void => {
         clearTimeout(timeout);
         ws.off("open", onOpen);
-        ws.off("error", onError);
+        ws.off("error", onConnectError);
       };
 
       const onOpen = (): void => {
+        settled = true;
         cleanup();
         resolve();
       };
 
-      const onError = (error: Error): void => {
+      const onConnectError = (error: Error): void => {
+        settled = true;
         cleanup();
         reject(error);
       };
 
       ws.once("open", onOpen);
-      ws.once("error", onError);
+      ws.once("error", onConnectError);
       ws.on("message", data => this.emit("message", rawDataToString(data)));
       ws.on("close", (code, reason) => this.emit("close", code, reason.toString("utf8")));
-      ws.on("error", error => this.emit("error", error));
+      ws.on("error", error => {
+        if (!settled) {
+          return;
+        }
+        this.safeEmitError(error);
+      });
     });
   }
 
@@ -146,6 +154,12 @@ export class HomeConnectTlsSocket extends EventEmitter {
       this.once("error", onError);
       this.once("close", onClose);
     });
+  }
+
+  private safeEmitError(error: Error): void {
+    if (this.listenerCount("error") > 0) {
+      this.emit("error", error);
+    }
   }
 }
 

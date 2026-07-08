@@ -2,9 +2,13 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.10",
+    "version": "0.0.11",
     "icon": "homeconnect-local.svg",
     "news": {
+      "0.0.11": {
+        "en": "Adds per-state metadata, program lists with favorite names and start program with options.",
+        "de": "Ergänzt State-Metadaten, Programmlisten mit Favoritennamen und Programmstart mit Optionen."
+      },
       "0.0.10": {
         "en": "Adds diagnostic states for appliance info, network info, service versions and registered apps/devices.",
         "de": "Ergänzt Diagnose-States für Geräteinfos, Netzwerkinfos, Service-Versionen und registrierte Apps/Geräte."

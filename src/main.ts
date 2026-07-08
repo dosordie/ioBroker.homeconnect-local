@@ -89,18 +89,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async ensureInfoConnectionObject(): Promise<void> {
-    await this.setObjectNotExistsAsync("info.connection", {
-      type: "state",
-      common: {
-        name: "If connected to at least one appliance",
-        type: "boolean",
-        role: "indicator.connected",
-        read: true,
-        write: false,
-        def: false,
-      },
-      native: {},
-    });
+    await this.ensureStateObject("info.connection", "If connected to at least one appliance", false, "indicator.connected");
   }
 
   private async prepareDeviceObjects(device: RunningDevice): Promise<void> {
@@ -127,45 +116,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       native: {},
     });
 
-    await this.setObjectNotExistsAsync(`${baseId}.info.connected`, {
-      type: "state",
-      common: {
-        name: "Connected",
-        type: "boolean",
-        role: "indicator.connected",
-        read: true,
-        write: false,
-        def: false,
-      },
-      native: {},
-    });
-
-    await this.setObjectNotExistsAsync(`${baseId}.info.lastMessage`, {
-      type: "state",
-      common: {
-        name: "Last raw Home Connect message",
-        type: "string",
-        role: "json",
-        read: true,
-        write: false,
-        def: "",
-      },
-      native: {},
-    });
-
-    await this.setObjectNotExistsAsync(`${baseId}.info.connectionType`, {
-      type: "state",
-      common: {
-        name: "Connection type",
-        type: "string",
-        role: "text",
-        read: true,
-        write: false,
-        def: "",
-      },
-      native: {},
-    });
-
+    await this.ensureStateObject(`${baseId}.info.connected`, "Connected", false, "indicator.connected");
+    await this.ensureStateObject(`${baseId}.info.lastMessage`, "Last raw Home Connect message", "", "json");
+    await this.ensureStateObject(`${baseId}.info.connectionType`, "Connection type", "", "text");
     await this.setState(`${baseId}.info.connectionType`, String(profile.connectionType), true);
 
     for (const channel of ["status", "program", "phases", "options", "settings", "events", "programs", "raw"]) {
@@ -244,6 +197,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async handleDeviceMessage(device: RunningDevice, message: HcMessage): Promise<void> {
+    await this.ensureStateObject(`${device.baseId}.info.lastMessage`, "Last raw Home Connect message", "", "json");
     await this.setState(`${device.baseId}.info.lastMessage`, JSON.stringify(message), true);
 
     if (message.resource?.startsWith("/ro/")) {
@@ -266,29 +220,60 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     const stateId = `${device.baseId}.${target.id}`;
     const rawStateId = `${device.baseId}.raw.uid_${target.uid}`;
+    const normalizedValue = this.normalizeStateValue(target.value);
+    const rawValue = JSON.stringify(value);
 
-    await this.ensureStateObject(stateId, target.name, target.value);
-    await this.setState(stateId, target.value, true);
+    await this.ensureStateObject(stateId, target.name, normalizedValue);
+    await this.setState(stateId, normalizedValue, true);
 
     if (this.currentConfig.debugRaw) {
-      await this.ensureStateObject(rawStateId, `Raw ${target.uid} ${target.name}`, JSON.stringify(value));
-      await this.setState(rawStateId, JSON.stringify(value), true);
+      await this.ensureStateObject(rawStateId, `Raw ${target.uid} ${target.name}`, "", "json");
+      await this.setState(rawStateId, rawValue, true);
     }
   }
 
-  private async ensureStateObject(id: string, name: string, value: ioBroker.StateValue): Promise<void> {
+  private normalizeStateValue(value: unknown): ioBroker.StateValue {
+    if (value === undefined || value === null) {
+      return "";
+    }
+
+    if (typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
+      return value;
+    }
+
+    return JSON.stringify(value);
+  }
+
+  private async ensureStateObject(id: string, name: string, value: ioBroker.StateValue, role?: string): Promise<void> {
     const type = typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string";
-    await this.setObjectNotExistsAsync(id, {
-      type: "state",
-      common: {
-        name,
-        type,
-        role: type === "boolean" ? "indicator" : "value",
-        read: true,
-        write: false,
-      },
-      native: {},
-    });
+    const desiredRole = role ?? (type === "boolean" ? "indicator" : "value");
+    const existing = await this.getObjectAsync(id);
+
+    const common: ioBroker.StateCommon = {
+      ...(existing?.common as ioBroker.StateCommon | undefined),
+      name,
+      type,
+      role: desiredRole,
+      read: true,
+      write: false,
+    };
+
+    if (!existing) {
+      await this.setObjectNotExistsAsync(id, {
+        type: "state",
+        common,
+        native: {},
+      });
+      return;
+    }
+
+    if (existing.type !== "state" || existing.common?.type !== type || existing.common?.role !== desiredRole) {
+      await this.extendObjectAsync(id, {
+        type: "state",
+        common,
+        native: existing.native ?? {},
+      });
+    }
   }
 
   private async updateGlobalConnectionState(): Promise<void> {

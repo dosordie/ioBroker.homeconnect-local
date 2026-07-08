@@ -83,7 +83,7 @@
     "globalDependencies": [{"admin": ">=6.0.0"}]
   },
   "native": {
-    "profilePath": "",
+    "profilePath": "/opt/iobroker/iobroker-data/files/0_userdata.0/homeconnect-lokal-zip",
     "appName": "ioBroker HomeConnect Local",
     "appId": "iobroker-homeconnect-local",
     "reconnectInterval": 30,

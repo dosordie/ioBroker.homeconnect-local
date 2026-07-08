@@ -1,7 +1,6 @@
-import crypto from "node:crypto";
-
 import { HomeConnectAesSocket } from "./aesSocket";
-import { appIdentityResponse, extractInitialMessageId, parseServiceVersions, serviceKeyForResource } from "./clientProtocol";
+import { runHomeConnectHandshake } from "./clientHandshake";
+import { extractInitialMessageId, parseServiceVersions, serviceKeyForResource } from "./clientProtocol";
 import { dumpMessage, parseMessage } from "./message";
 import { PendingResponses } from "./pendingResponses";
 import { HomeConnectSocketLike } from "./socket";
@@ -68,37 +67,17 @@ export class HomeConnectClient {
     this.socket.on("error", error => this.handleSocketError(error));
     this.socket.on("close", (code, reason) => this.handleSocketClose(code, reason));
 
-    await this.send(appIdentityResponse(initial, this.appName, this.appId));
-
-    const services = await this.sendSync({ resource: "/ci/services", version: 1, action: "GET" });
-    this.setServiceVersions(services);
-    await this.forwardMessage(services);
-
-    if ((this.serviceVersions.ci ?? 1) < 3) {
-      const nonce = crypto.randomBytes(32).toString("base64url");
-      await this.sendSync({ resource: "/ci/authentication", action: "GET", data: { nonce } });
-
-      try {
-        const ciInfo = await this.sendSync({ resource: "/ci/info", action: "GET" });
-        await this.forwardMessage(ciInfo);
-      } catch (error) {
-        this.log?.debug(`Optional /ci/info failed: ${String(error)}`);
-      }
-    }
-
-    if (this.serviceVersions.iz !== undefined) {
-      const izInfo = await this.sendSync({ resource: "/iz/info", action: "GET" });
-      await this.forwardMessage(izInfo);
-    }
-
-    if ((this.serviceVersions.ei ?? 1) === 2) {
-      await this.send({ resource: "/ei/deviceReady", action: "NOTIFY" });
-    }
-
-    if (this.serviceVersions.ni !== undefined) {
-      const niInfo = await this.sendSync({ resource: "/ni/info", action: "GET" });
-      await this.forwardMessage(niInfo);
-    }
+    await runHomeConnectHandshake({
+      appName: this.appName,
+      appId: this.appId,
+      initial,
+      serviceVersions: this.serviceVersions,
+      send: message => this.send(message),
+      sendSync: (message, timeoutMs) => this.sendSync(message, timeoutMs),
+      forwardMessage: message => this.forwardMessage(message),
+      setServiceVersions: message => this.setServiceVersions(message),
+      log: this.log,
+    });
 
     this.connected = true;
   }

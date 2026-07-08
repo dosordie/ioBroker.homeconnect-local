@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 
 import WebSocket from "ws";
 
+import { base64UrlDecode, formatHost } from "./socket";
+
 const ENCRYPT_DIRECTION = Buffer.from([0x45]); // E
 const DECRYPT_DIRECTION = Buffer.from([0x43]); // C
 const MINIMUM_MESSAGE_LENGTH = 32;
@@ -227,14 +229,4 @@ function rawDataToBuffer(data: WebSocket.RawData): Buffer {
   }
 
   return Buffer.from(data);
-}
-
-function base64UrlDecode(value: string): Buffer {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-  return Buffer.from(padded, "base64");
-}
-
-function formatHost(host: string): string {
-  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }

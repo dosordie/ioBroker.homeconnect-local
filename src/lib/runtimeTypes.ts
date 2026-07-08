@@ -14,6 +14,8 @@ export interface RunningDevice {
   writableUids: Set<string>;
   blockedCommands: string[];
   stateValuesByFeature: Map<string, ioBroker.StateValue>;
+  rawValuesByFeature: Map<string, unknown>;
+  programExecutionByFeature: Map<string, string>;
 }
 
 export type WritableStateKind = "value" | "command" | "startProgram" | "startProgramWithOptions" | "startProgramName";

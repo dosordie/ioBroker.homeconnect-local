@@ -290,7 +290,12 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       }
 
       const selectedProgramState = await this.getStateAsync(`${device.baseId}.program.SelectedProgram`);
-      const selectedProgramRaw = this.stateValueToRaw(device, selectedProgramUid, selectedProgramState?.val);
+      if (selectedProgramState?.val === undefined) {
+        this.log.warn(`${device.profile.haId}: cannot start program, no selected program is known`);
+        return undefined;
+      }
+
+      const selectedProgramRaw = this.stateValueToRaw(device, selectedProgramUid, selectedProgramState.val);
       if (selectedProgramRaw === undefined || selectedProgramRaw === 0 || selectedProgramRaw === "") {
         this.log.warn(`${device.profile.haId}: cannot start program, no selected program is known`);
         return undefined;

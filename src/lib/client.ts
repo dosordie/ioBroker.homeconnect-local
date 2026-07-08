@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 
 import { HomeConnectAesSocket } from "./aesSocket";
-import { dumpMessage, parseMessage, responseFor } from "./message";
+import { appIdentityResponse, extractInitialMessageId, parseServiceVersions, serviceKeyForResource } from "./clientProtocol";
+import { dumpMessage, parseMessage } from "./message";
 import { HomeConnectSocketLike } from "./socket";
 import { HomeConnectTlsSocket } from "./tlsSocket";
 import { ConnectionType, HcMessage } from "./types";
@@ -66,17 +67,13 @@ export class HomeConnectClient {
     }
 
     this.sid = initial.sID;
-    this.lastMsgId = this.extractInitialMessageId(initial);
+    this.lastMsgId = extractInitialMessageId(initial);
 
     this.socket.on("message", payload => void this.handleRawMessage(payload));
     this.socket.on("error", error => this.handleSocketError(error));
     this.socket.on("close", (code, reason) => this.handleSocketClose(code, reason));
 
-    await this.send(responseFor(initial, {
-      deviceType: initial.version === 1 ? 2 : "Application",
-      deviceName: this.appName,
-      deviceID: this.appId,
-    }));
+    await this.send(appIdentityResponse(initial, this.appName, this.appId));
 
     const services = await this.sendSync({ resource: "/ci/services", version: 1, action: "GET" });
     this.setServiceVersions(services);
@@ -174,17 +171,12 @@ export class HomeConnectClient {
   }
 
   private prepareMessage(message: HcMessage): HcMessage {
-    const resource = message.resource ?? "";
-    const service = resource.startsWith("/") ? resource.slice(1, 3) : resource.slice(0, 2);
-
-    const prepared: HcMessage = {
+    return {
       ...message,
       sID: message.sID ?? this.sid,
       msgID: message.msgID ?? this.nextMsgId(),
-      version: message.version ?? this.serviceVersions[service] ?? 1,
+      version: message.version ?? this.serviceVersions[serviceKeyForResource(message.resource)] ?? 1,
     };
-
-    return prepared;
   }
 
   private nextMsgId(): number {
@@ -197,36 +189,8 @@ export class HomeConnectClient {
     return current;
   }
 
-  private extractInitialMessageId(message: HcMessage): number {
-    const firstData = Array.isArray(message.data) ? message.data[0] : undefined;
-    if (firstData && typeof firstData === "object" && "edMsgID" in firstData) {
-      const edMsgId = Number((firstData as Record<string, unknown>).edMsgID);
-      if (Number.isFinite(edMsgId)) {
-        return edMsgId;
-      }
-    }
-
-    return (message.msgID ?? 0) + 1;
-  }
-
   private setServiceVersions(message: HcMessage): void {
-    const data = Array.isArray(message.data) ? message.data : [];
-    const versions: Record<string, number> = {};
-
-    for (const item of data) {
-      if (!item || typeof item !== "object") {
-        continue;
-      }
-
-      const record = item as Record<string, unknown>;
-      const service = String(record.service ?? "");
-      const version = Number(record.version ?? 1);
-      if (service) {
-        versions[service] = version;
-      }
-    }
-
-    this.serviceVersions = versions;
+    this.serviceVersions = parseServiceVersions(message);
     this.log?.debug(`HC services: ${JSON.stringify(this.serviceVersions)}`);
   }
 

@@ -78,6 +78,10 @@ export class StateMapper {
       return "settings";
     }
 
+    if (featureName.includes(".Command.")) {
+      return "commands";
+    }
+
     if (featureName.includes(".Event.")) {
       return "events";
     }

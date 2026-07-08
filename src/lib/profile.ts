@@ -11,6 +11,7 @@ interface ProfileFiles {
   baseDir: string;
   jsonPath: string;
   profile: ApplianceProfileJson;
+  profileFile?: string;
 }
 
 export function loadProfiles(profilePath: string): ApplianceProfile[] {
@@ -19,20 +20,20 @@ export function loadProfiles(profilePath: string): ApplianceProfile[] {
   }
 
   const stat = fs.statSync(profilePath);
-  const directories: string[] = [];
+  const profileFiles: ProfileFiles[] = [];
 
   if (stat.isDirectory()) {
-    directories.push(profilePath);
+    profileFiles.push(...findProfileJsonFiles(profilePath));
+    profileFiles.push(...findZipProfileFiles(profilePath));
   } else if (stat.isFile() && profilePath.toLowerCase().endsWith(".zip")) {
-    directories.push(extractZipToTemp(profilePath));
+    profileFiles.push(...findProfileJsonFiles(extractZipToTemp(profilePath), profilePath));
   } else if (stat.isFile() && profilePath.toLowerCase().endsWith(".json")) {
-    directories.push(path.dirname(profilePath));
+    profileFiles.push(...findProfileJsonFiles(path.dirname(profilePath)));
   } else {
     throw new Error(`Unsupported profile path: ${profilePath}`);
   }
 
-  const profileFiles = directories.flatMap(findProfileJsonFiles);
-  return profileFiles.map(loadProfileFromFiles);
+  return deduplicateProfiles(profileFiles).map(loadProfileFromFiles);
 }
 
 function extractZipToTemp(zipPath: string): string {
@@ -42,29 +43,68 @@ function extractZipToTemp(zipPath: string): string {
   return targetDir;
 }
 
-function findProfileJsonFiles(baseDir: string): ProfileFiles[] {
+function findZipProfileFiles(baseDir: string): ProfileFiles[] {
   const result: ProfileFiles[] = [];
+
+  for (const filePath of findFiles(baseDir, file => file.toLowerCase().endsWith(".zip"))) {
+    try {
+      result.push(...findProfileJsonFiles(extractZipToTemp(filePath), filePath));
+    } catch {
+      // Ignore non-profile or broken ZIP files in the configured profile directory.
+    }
+  }
+
+  return result;
+}
+
+function findProfileJsonFiles(baseDir: string, profileFile?: string): ProfileFiles[] {
+  const result: ProfileFiles[] = [];
+
+  for (const filePath of findFiles(baseDir, file => file.toLowerCase().endsWith(".json"))) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as ApplianceProfileJson;
+      if (parsed.haId && parsed.key) {
+        result.push({ baseDir: path.dirname(filePath), jsonPath: filePath, profile: parsed, profileFile });
+      }
+    } catch {
+      // Ignore unrelated JSON files in profile directories.
+    }
+  }
+
+  return result;
+}
+
+function findFiles(baseDir: string, predicate: (fileName: string) => boolean): string[] {
+  const result: string[] = [];
 
   for (const file of fs.readdirSync(baseDir)) {
     const filePath = path.join(baseDir, file);
     const stat = fs.statSync(filePath);
 
     if (stat.isDirectory()) {
-      result.push(...findProfileJsonFiles(filePath));
+      result.push(...findFiles(filePath, predicate));
       continue;
     }
 
-    if (!file.toLowerCase().endsWith(".json")) {
-      continue;
-    }
-
-    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as ApplianceProfileJson;
-    if (parsed.haId && parsed.key) {
-      result.push({ baseDir: path.dirname(filePath), jsonPath: filePath, profile: parsed });
+    if (stat.isFile() && predicate(file)) {
+      result.push(filePath);
     }
   }
 
   return result;
+}
+
+function deduplicateProfiles(files: ProfileFiles[]): ProfileFiles[] {
+  const result = new Map<string, ProfileFiles>();
+
+  for (const file of files) {
+    const existing = result.get(file.profile.haId);
+    if (!existing || (!existing.profileFile && file.profileFile)) {
+      result.set(file.profile.haId, file);
+    }
+  }
+
+  return Array.from(result.values());
 }
 
 function loadProfileFromFiles(files: ProfileFiles): ApplianceProfile {
@@ -91,6 +131,7 @@ function loadProfileFromFiles(files: ProfileFiles): ApplianceProfile {
     connectionType: profile.connectionType ?? "AES",
     key: requiredString(profile.key, `Missing key in ${files.jsonPath}`),
     iv: profile.iv,
+    profileFile: files.profileFile,
     featureMapping: parseFeatureMapping(featureMappingXml, deviceDescriptionXml),
   };
 }

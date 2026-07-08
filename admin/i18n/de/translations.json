@@ -1,13 +1,22 @@
 {
   "Main settings": "Haupteinstellungen",
-  "Profile ZIP or directory path": "Profil-ZIP oder Verzeichnispfad",
-  "Absolute path to a profile ZIP created by homeconnect-profile-downloader or to a directory containing extracted profile JSON/XML files.": "Absoluter Pfad zu einem Profil-ZIP aus homeconnect-profile-downloader oder zu einem Verzeichnis mit entpackten Profil-JSON/XML-Dateien.",
+  "Profile directory path": "Profilordner-Pfad",
+  "Absolute container path to a directory containing Home Connect profile ZIP files. A single ZIP or extracted profile directory is still supported.": "Absoluter Container-Pfad zu einem Ordner mit Home-Connect-Profil-ZIP-Dateien. Ein einzelnes ZIP oder ein entpackter Profilordner wird weiterhin unterstützt.",
+  "Automatically add scanned profiles to the device table": "Gescannte Profile automatisch zur Gerätetabelle hinzufügen",
+  "New profiles are added as disabled device suggestions. Existing enabled, host and haId values are preserved.": "Neue Profile werden als deaktivierte Gerätevorschläge hinzugefügt. Vorhandene Aktiv-, Host- und haId-Werte bleiben erhalten.",
   "App name": "App-Name",
   "App ID": "App-ID",
   "Reconnect interval in seconds": "Reconnect-Intervall in Sekunden",
   "Create raw uid states and log received /ro values": "Raw-UID-States anlegen und empfangene /ro-Werte loggen",
   "Appliances": "Geräte",
+  "Profiles found in the profile directory are added automatically as disabled suggestions. Enable a row and enter the appliance IP or hostname.": "Im Profilordner gefundene Profile werden automatisch als deaktivierte Vorschläge ergänzt. Aktiviere eine Zeile und trage die Geräte-IP oder den Hostnamen ein.",
   "Enabled": "Aktiv",
+  "Name": "Name",
+  "IP or host": "IP oder Host",
   "haId from profile": "haId aus Profil",
-  "IP or host": "IP oder Host"
+  "Type": "Typ",
+  "Brand": "Marke",
+  "VIB": "VIB",
+  "Connection": "Verbindung",
+  "Profile file": "Profildatei"
 }

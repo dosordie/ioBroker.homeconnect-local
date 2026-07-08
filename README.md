@@ -2,7 +2,7 @@
 
 Read-only proof of concept for local LAN monitoring of Bosch/Siemens/BSH Home Connect appliances.
 
-The adapter is intended to talk to appliances locally instead of using the Home Connect cloud API during runtime. The first implementation focuses on AES based devices on `ws://<ip>:80/homeconnect`. TLS-PSK devices on `wss://<ip>:443/homeconnect` are detected from the profile, but not implemented yet.
+The adapter is intended to talk to appliances locally instead of using the Home Connect cloud API during runtime. The current implementation supports AES based devices on `ws://<ip>:80/homeconnect` and an experimental TLS-PSK transport for devices on `wss://<ip>:443/homeconnect`.
 
 ## Current PoC scope
 
@@ -11,6 +11,7 @@ Implemented:
 - Load one profile ZIP or an extracted profile directory from `homeconnect-profile-downloader`.
 - Parse the profile JSON, `DeviceDescription.xml`, and `FeatureMapping.xml`.
 - Connect to AES based appliances through the local WebSocket endpoint.
+- Experimental TLS-PSK WebSocket transport for TLS-only appliances, for example newer dishwashers.
 - Perform the local Home Connect handshake.
 - Request `/ro/allDescriptionChanges` and `/ro/allMandatoryValues`.
 - Process live `/ro/values` and other `/ro/*` messages.
@@ -21,11 +22,11 @@ Implemented:
 
 Not implemented yet:
 
-- TLS-PSK mode for newer TLS-only appliances.
 - Admin upload/import workflow for ZIP files.
 - mDNS discovery.
 - Write/control commands.
 - Stable state schema migration and tests.
+- TLS-PSK compatibility fallback variants if a Node/OpenSSL combination rejects the first cipher setup.
 
 ## First test path
 
@@ -34,7 +35,7 @@ Not implemented yet:
 3. Copy the ZIP onto the ioBroker host, for example:
 
    ```bash
-   /opt/iobroker/homeconnect-profiles/washer.zip
+   /opt/iobroker/homeconnect-profiles/dishwasher.zip
    ```
 
 4. Adapter settings:
@@ -47,13 +48,17 @@ Not implemented yet:
 
 5. Start the adapter and set log level to `debug` for the first run.
 
-For the first AES tests, use appliances whose profile JSON contains:
+The adapter chooses the transport from the profile JSON:
 
 ```json
 "connectionType": "AES"
 ```
 
-TLS-only profiles are currently skipped with a warning.
+or:
+
+```json
+"connectionType": "TLS"
+```
 
 ## State layout
 
@@ -98,6 +103,12 @@ Local AES mode uses:
 - AES-256-CBC stream encryption
 - HMAC-SHA256 authentication truncated to 16 bytes
 - PSK and IV from the downloaded device profile
+
+Local TLS mode uses:
+
+- URL: `wss://<ip>:443/homeconnect`
+- TLS 1.2 with PSK from the downloaded device profile
+- Plain Home Connect JSON messages inside the protected WebSocket
 
 The first handshake follows the known Home Connect Local flow:
 

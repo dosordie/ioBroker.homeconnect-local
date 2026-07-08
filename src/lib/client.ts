@@ -71,7 +71,7 @@ export class HomeConnectClient {
       appName: this.appName,
       appId: this.appId,
       initial,
-      serviceVersions: this.serviceVersions,
+      getServiceVersions: () => this.serviceVersions,
       send: message => this.send(message),
       sendSync: (message, timeoutMs) => this.sendSync(message, timeoutMs),
       forwardMessage: message => this.forwardMessage(message),

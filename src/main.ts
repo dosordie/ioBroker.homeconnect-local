@@ -1,51 +1,28 @@
 import * as utils from "@iobroker/adapter-core";
 
 import { HomeConnectClient } from "./lib/client";
+import { ensureDiagnosticStates, writeApplianceInfo, writeNetworkInfo, writeRegisteredDevices, writeServiceInfo } from "./lib/diagnosticsWriter";
+import { ensureChannel, ensureStateObject, setBooleanState, setNumberState, setTextState } from "./lib/objectHelpers";
+import { translateEnumValue } from "./lib/enumTranslations";
+import { mergeMetadata, metadataForFeature, metadataFromDescriptionChange, StateCommonMetadata } from "./lib/stateMetadata";
+import {
+  ACTIVE_PROGRAM_FEATURE,
+  DANGEROUS_COMMAND_MARKERS,
+  FINISH_IN_FEATURE,
+  POWER_STATE_OFF,
+  POWER_STATE_ON,
+  POWER_STATE_UID,
+  POWER_STATE_UID_NUMBER,
+  SELECTED_PROGRAM_FEATURE,
+  START_IN_FEATURE,
+} from "./lib/constants";
 import { normalizeUid, sanitizeObjectId } from "./lib/ids";
 import { loadProfiles } from "./lib/profile";
+import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/reconnectPolicy";
+import { RunningDevice, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
+import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue, StateTarget } from "./lib/types";
-
-const POWER_STATE_UID = "021B";
-const POWER_STATE_UID_NUMBER = 0x021b;
-const POWER_STATE_OFF = 1;
-const POWER_STATE_ON = 2;
-const SELECTED_PROGRAM_FEATURE = "BSH.Common.Root.SelectedProgram";
-const ACTIVE_PROGRAM_FEATURE = "BSH.Common.Root.ActiveProgram";
-const START_IN_FEATURE = "BSH.Common.Option.StartInRelative";
-const FINISH_IN_FEATURE = "BSH.Common.Option.FinishInRelative";
-
-const DANGEROUS_COMMAND_MARKERS = [
-  "FactoryReset",
-  "NetworkReset",
-  "DeactivateWiFi",
-  "AllowSoftwareUpdate",
-  "AllowSoftwareDownload",
-  "SoftwareUpdate",
-  "SoftwareDownload",
-];
-
-interface RunningDevice {
-  baseId: string;
-  config: ConfiguredDevice;
-  profile: ApplianceProfile;
-  mapper: StateMapper;
-  client?: HomeConnectClient;
-  reconnectTimer?: NodeJS.Timeout;
-  reconnecting: boolean;
-  reconnectFailures: number;
-  writableUids: Set<string>;
-  blockedCommands: string[];
-  stateValuesByFeature: Map<string, ioBroker.StateValue>;
-}
-
-interface WritableState {
-  deviceHaId: string;
-  uid: number;
-  featureName: string;
-  kind: "value" | "command" | "startProgram" | "startProgramWithOptions";
-  stateId: string;
-}
 
 class HomeconnectLocalAdapter extends utils.Adapter {
   private devices = new Map<string, RunningDevice>();
@@ -248,7 +225,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     for (const channel of ["status", "program", "phases", "options", "settings", "events", "programs", "commands", "raw", "metadata", "network", "services", "registeredDevices", "expertCommands"]) {
       await this.ensureChannel(`${baseId}.${channel}`, channel);
     }
-    await this.ensureDiagnosticStates(device);
+    await ensureDiagnosticStates(this, device);
     await this.ensureProgramStates(device);
     await this.prepareRootProgramAliasObjects(device);
 
@@ -260,24 +237,11 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.updateProgramList(device);
   }
 
-  private async ensureDiagnosticStates(device: RunningDevice): Promise<void> {
-    const baseId = device.baseId;
-    for (const [id, type] of Object.entries({
-      "network.json": "json", "network.type": "text", "network.ssid": "text", "network.status": "text", "network.euiAddress": "text", "network.ipv4Address": "text", "network.ipv4Gateway": "text", "network.ipv4DnsServer": "text", "network.ipv6Address": "text",
-    })) await this.ensureStateObject(`${baseId}.${id}`, id, "", type);
-    await this.ensureStateObject(`${baseId}.network.rssi`, "RSSI", 0, "value");
-    await this.ensureStateObject(`${baseId}.network.configured`, "Configured", false, "indicator");
-    await this.ensureStateObject(`${baseId}.network.primary`, "Primary interface", false, "indicator");
-    await this.ensureStateObject(`${baseId}.network.ipv4PrefixSize`, "IPv4 prefix size", 0, "value");
-    await this.ensureStateObject(`${baseId}.services.json`, "Raw service versions", "", "json");
-    await this.ensureStateObject(`${baseId}.registeredDevices.json`, "Raw registered apps/devices", "", "json");
-    await this.ensureStateObject(`${baseId}.registeredDevices.count`, "Registered apps/devices count", 0, "value");
-    await this.ensureStateObject(`${baseId}.registeredDevices.connectedCount`, "Connected registered apps/devices count", 0, "value");
-    await this.ensureStateObject(`${baseId}.expertCommands.blockedList`, "Blocked dangerous commands", "", "json");
-  }
-
   private async ensureProgramStates(device: RunningDevice): Promise<void> {
     await this.ensureStateObject(`${device.baseId}.program.startOptionsJson`, "Start options JSON", "{}", "json", true);
+    await this.ensureStateObject(`${device.baseId}.program.startProgramName`, "Start program by name", "", "text", true);
+    await this.ensureStateObject(`${device.baseId}.program.selectedProgramName`, "Selected program name", "", "text");
+    await this.ensureStateObject(`${device.baseId}.program.activeProgramName`, "Active program name", "", "text");
     await this.ensureStateObject(`${device.baseId}.programs.availableList`, "Available programs list", "", "text");
     await this.ensureStateObject(`${device.baseId}.programs.availableJson`, "Available programs JSON", "", "json");
   }
@@ -320,6 +284,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private async prepareStartProgramObjects(device: RunningDevice): Promise<void> {
     const activeProgramUid = this.uidForFeature(device.profile, ACTIVE_PROGRAM_FEATURE);
     if (activeProgramUid === undefined) return;
+    this.registerWritableState(device, `${device.baseId}.program.startProgramName`, activeProgramUid, ACTIVE_PROGRAM_FEATURE, "startProgramName");
     await this.ensureStateObject(`${device.baseId}.commands.StartProgram`, "Start selected program", false, "button", true);
     this.registerWritableState(device, `${device.baseId}.commands.StartProgram`, activeProgramUid, ACTIVE_PROGRAM_FEATURE, "startProgram");
     await this.ensureStateObject(`${device.baseId}.commands.StartProgramWithOptions`, "Start selected program with program.startOptionsJson", false, "button", true);
@@ -381,6 +346,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
       if (writableState.kind === "startProgramWithOptions") {
         await this.writeStartProgramWithOptions(device, writableState.uid, rawValue);
+      } else if (writableState.kind === "startProgramName") {
+        this.log.info(`${device.profile.haId}: starting program by name = ${JSON.stringify(rawValue)}`);
+        await device.client.writeValue(writableState.uid, rawValue);
       } else {
         this.log.info(`${device.profile.haId}: writing ${writableState.featureName} = ${JSON.stringify(rawValue)}`);
         await device.client.writeValue(writableState.uid, rawValue);
@@ -398,9 +366,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async valueForWrite(device: RunningDevice, writableState: WritableState, value: ioBroker.StateValue): Promise<unknown> {
-    if (writableState.kind === "command") return this.isTruthyWrite(value) ? true : undefined;
+    if (writableState.kind === "command") return isTruthyWrite(value) ? true : undefined;
+    if (writableState.kind === "startProgramName") return this.rawProgramForName(device, value);
     if (writableState.kind === "startProgram" || writableState.kind === "startProgramWithOptions") {
-      if (!this.isTruthyWrite(value)) return undefined;
+      if (!isTruthyWrite(value)) return undefined;
       const selectedProgramUid = this.uidForFeature(device.profile, SELECTED_PROGRAM_FEATURE);
       if (selectedProgramUid === undefined) {
         this.log.warn(`${device.profile.haId}: cannot start program, SelectedProgram UID missing`);
@@ -414,16 +383,18 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         this.log.warn(`${device.profile.haId}: cannot start program, no selected program is known`);
         return undefined;
       }
-      return this.stateValueToRaw(device, selectedProgramUid, selectedProgramState.val);
+      const raw = stateValueToRaw(device.profile, selectedProgramUid, selectedProgramState.val);
+      this.log.info(`${device.profile.haId}: starting selected program ${JSON.stringify(raw)} (${this.programDisplayName(device, String(selectedProgramState.val))})`);
+      return raw;
     }
-    if (writableState.uid === POWER_STATE_UID_NUMBER) return this.stateValueToPowerBoolean(value) ? POWER_STATE_ON : POWER_STATE_OFF;
-    return this.stateValueToRaw(device, writableState.uid, value);
+    if (writableState.uid === POWER_STATE_UID_NUMBER) return stateValueToPowerBoolean(value) ? POWER_STATE_ON : POWER_STATE_OFF;
+    return stateValueToRaw(device.profile, writableState.uid, value);
   }
 
   private async writeStartProgramWithOptions(device: RunningDevice, activeProgramUid: number, selectedProgramRaw: unknown): Promise<void> {
     if (!device.client) throw new Error("Device is not connected");
     const optionsState = await this.getStateAsync(`${device.baseId}.program.startOptionsJson`);
-    const options = this.parseStartOptions(optionsState?.val);
+    const options = parseJsonObject(optionsState?.val);
     const values = this.buildStartOptionValues(device, options);
     for (const entry of values) {
       this.log.info(`${device.profile.haId}: writing start option uid ${entry.uid} = ${JSON.stringify(entry.value)}`);
@@ -433,94 +404,28 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await device.client.writeValue(activeProgramUid, selectedProgramRaw);
   }
 
-  private parseStartOptions(value: ioBroker.StateValue | undefined): Record<string, unknown> {
-    if (value === undefined || value === null || value === "") return {};
-    if (typeof value === "object") return value as Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(String(value));
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-    } catch {
-      return {};
-    }
-  }
-
   private buildStartOptionValues(device: RunningDevice, options: Record<string, unknown>): Array<{ uid: number; value: unknown }> {
     const result: Array<{ uid: number; value: unknown }> = [];
     const add = (featureName: string, value: unknown): void => {
       const uid = this.uidForFeature(device.profile, featureName);
-      if (uid !== undefined && value !== undefined) result.push({ uid, value: this.stateValueToRaw(device, uid, this.toStateValue(value)) });
+      if (uid !== undefined && value !== undefined) result.push({ uid, value: stateValueToRaw(device.profile, uid, toStateValue(value)) });
     };
-    add(START_IN_FEATURE, this.durationToSeconds(options.start_in));
-    add(FINISH_IN_FEATURE, this.durationToSeconds(options.finish_in));
+    add(START_IN_FEATURE, durationToSeconds(options.start_in));
+    add(FINISH_IN_FEATURE, durationToSeconds(options.finish_in));
 
     const optionMap = options.options;
     if (optionMap && typeof optionMap === "object" && !Array.isArray(optionMap)) {
       for (const [key, value] of Object.entries(optionMap as Record<string, unknown>)) {
         const uid = this.uidForFeature(device.profile, key) ?? this.uidStringToNumber(key);
-        if (uid !== undefined) result.push({ uid, value: this.stateValueToRaw(device, uid, this.toStateValue(value)) });
+        if (uid !== undefined) result.push({ uid, value: stateValueToRaw(device.profile, uid, toStateValue(value)) });
       }
     }
     return result;
   }
 
-  private durationToSeconds(value: unknown): number | undefined {
-    if (value === undefined || value === null || value === "") return undefined;
-    if (typeof value === "number") return value;
-    if (typeof value === "object" && !Array.isArray(value)) {
-      const r = value as Record<string, unknown>;
-      return Number(r.hours ?? 0) * 3600 + Number(r.minutes ?? 0) * 60 + Number(r.seconds ?? 0);
-    }
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-
-  private toStateValue(value: unknown): ioBroker.StateValue {
-    if (value === null || value === undefined) return "";
-    if (typeof value === "boolean" || typeof value === "number" || typeof value === "string") return value;
-    return JSON.stringify(value);
-  }
-
   private normalizeWrittenAckValue(writableState: WritableState, rawValue: unknown): ioBroker.StateValue {
     if (writableState.uid === POWER_STATE_UID_NUMBER) return Number(rawValue) === POWER_STATE_ON;
-    return this.toStateValue(rawValue);
-  }
-
-  private stateValueToRaw(device: RunningDevice, uid: number, value: ioBroker.StateValue): unknown {
-    if (value === undefined || value === null) return undefined;
-    const normalizedUid = normalizeUid(uid);
-    if (!normalizedUid) return value;
-    if (typeof value === "boolean" || typeof value === "number") return value;
-    const text = String(value);
-    const numericText = Number(text);
-    if (text.trim() !== "" && Number.isFinite(numericText)) return numericText;
-    const enumType = device.profile.featureMapping.enumTypeByUid[normalizedUid];
-    if (enumType) {
-      const enumMap = device.profile.featureMapping.enumValuesByType[enumType] ?? {};
-      const lower = text.toLowerCase();
-      for (const [raw, label] of Object.entries(enumMap)) {
-        if (String(label).toLowerCase() === lower || String(label).split(".").pop()?.toLowerCase() === lower) {
-          const rawNumeric = Number(raw);
-          return Number.isFinite(rawNumeric) ? rawNumeric : raw;
-        }
-      }
-    }
-    const wanted = text.toLowerCase();
-    for (const [rawUid, featureName] of Object.entries(device.profile.featureMapping.featuresByUid)) {
-      const lastPart = featureName.split(".").pop()?.toLowerCase();
-      if (featureName.toLowerCase() === wanted || lastPart === wanted) return this.uidStringToNumber(rawUid) ?? rawUid;
-    }
-    return value;
-  }
-
-  private stateValueToPowerBoolean(value: ioBroker.StateValue): boolean {
-    if (value === true || value === 1) return true;
-    if (value === false || value === 0) return false;
-    const text = String(value).toLowerCase();
-    return text === "on" || text.endsWith(".on") || text === "true" || text === "1" || text === "ein";
-  }
-
-  private isTruthyWrite(value: ioBroker.StateValue): boolean {
-    return value === true || value === 1 || String(value).toLowerCase() === "true" || String(value).toLowerCase() === "1";
+    return toStateValue(rawValue);
   }
 
   private scheduleReconnect(device: RunningDevice, error?: Error): void {
@@ -540,8 +445,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private logConnectionFailure(device: RunningDevice, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     device.reconnectFailures += 1;
-    if (device.reconnectFailures === 1) this.log.warn(`${device.profile.haId}: connection failed: ${message}`);
-    else this.log.debug(`${device.profile.haId}: still offline, retrying: ${message}`);
+    const level = connectionFailureLogLevel(message, device.reconnectFailures);
+    this.log[level](connectionFailureLogMessage(device.profile.haId, message, device.reconnectFailures));
   }
 
   private async setDeviceConnectionState(device: RunningDevice, connected: boolean, error?: unknown): Promise<void> {
@@ -562,66 +467,15 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private async handleDeviceMessage(device: RunningDevice, message: HcMessage): Promise<void> {
     await this.setState(`${device.baseId}.info.lastSeen`, new Date().toISOString(), true);
     await this.setState(`${device.baseId}.info.lastMessage`, JSON.stringify(message), true);
-    if (message.resource === "/ci/info" || message.resource === "/iz/info") await this.writeApplianceInfo(device, message.data);
-    if (message.resource === "/ni/info") await this.writeNetworkInfo(device, message.data);
-    if (message.resource === "/ci/services") await this.writeServiceInfo(device, message.data);
-    if (message.resource === "/ci/registeredDevices") await this.writeRegisteredDevices(device, message.data);
+    if (message.resource === "/ci/info" || message.resource === "/iz/info") await writeApplianceInfo(this, device, message.data);
+    if (message.resource === "/ni/info") await writeNetworkInfo(this, device, message.data);
+    if (message.resource === "/ci/services") await writeServiceInfo(this, device, message.data);
+    if (message.resource === "/ci/registeredDevices") await writeRegisteredDevices(this, device, message.data);
     if (message.resource === "/ro/allDescriptionChanges" || message.resource === "/ro/descriptionChange") await this.applyDescriptionChanges(device, message.data);
     if (message.resource?.startsWith("/ro/")) {
       if (this.currentConfig.debugRaw) this.log.debug(`${device.profile.haId}: ${message.resource} ${JSON.stringify(message.data)}`);
       for (const value of device.mapper.valuesFromMessageData(message.data)) if ("value" in value) await this.writeRoValue(device, value);
     }
-  }
-
-  private async writeApplianceInfo(device: RunningDevice, data: unknown): Promise<void> {
-    const record = this.firstRecord(data);
-    if (!record) return;
-    await this.setState(`${device.baseId}.general.rawInfo`, JSON.stringify(record), true);
-    for (const id of ["deviceID", "eNumber", "brand", "vib", "mac", "haVersion", "swVersion", "hwVersion", "deviceType", "deviceInfo", "customerIndex", "serialNumber", "fdString"]) {
-      await this.setTextState(`${device.baseId}.general.${id}`, record[id]);
-    }
-    await this.setTextState(`${device.baseId}.general.type`, record.deviceType ?? device.profile.type);
-  }
-
-  private async writeNetworkInfo(device: RunningDevice, data: unknown): Promise<void> {
-    const record = this.firstRecord(data);
-    if (!record) return;
-    const ipv4 = this.recordValue(record.ipV4);
-    const ipv6 = this.recordValue(record.ipV6);
-    await this.setState(`${device.baseId}.network.json`, JSON.stringify(data), true);
-    await this.setTextState(`${device.baseId}.network.type`, record.type);
-    await this.setTextState(`${device.baseId}.network.ssid`, record.ssid);
-    await this.setNumberState(`${device.baseId}.network.rssi`, record.rssi);
-    await this.setTextState(`${device.baseId}.network.status`, record.status);
-    await this.setBooleanState(`${device.baseId}.network.configured`, record.configured);
-    await this.setBooleanState(`${device.baseId}.network.primary`, record.primary);
-    await this.setTextState(`${device.baseId}.network.euiAddress`, record.euiAddress);
-    await this.setTextState(`${device.baseId}.network.ipv4Address`, ipv4?.ipAddress);
-    await this.setNumberState(`${device.baseId}.network.ipv4PrefixSize`, ipv4?.prefixSize);
-    await this.setTextState(`${device.baseId}.network.ipv4Gateway`, ipv4?.gateway);
-    await this.setTextState(`${device.baseId}.network.ipv4DnsServer`, ipv4?.dnsServer);
-    await this.setTextState(`${device.baseId}.network.ipv6Address`, ipv6?.ipAddress);
-  }
-
-  private async writeServiceInfo(device: RunningDevice, data: unknown): Promise<void> {
-    const services: Record<string, number> = {};
-    for (const item of this.dataArray(data)) {
-      const service = typeof item.service === "string" ? item.service : undefined;
-      const version = Number(item.version);
-      if (!service || !Number.isFinite(version)) continue;
-      services[service] = version;
-      const id = `${device.baseId}.services.${sanitizeObjectId(service)}`;
-      await this.ensureStateObject(id, `Service ${service} version`, 0, "value");
-      await this.setState(id, version, true);
-    }
-    await this.setState(`${device.baseId}.services.json`, JSON.stringify(services), true);
-  }
-
-  private async writeRegisteredDevices(device: RunningDevice, data: unknown): Promise<void> {
-    const devices = this.dataArray(data);
-    await this.setState(`${device.baseId}.registeredDevices.json`, JSON.stringify(devices), true);
-    await this.setState(`${device.baseId}.registeredDevices.count`, devices.length, true);
-    await this.setState(`${device.baseId}.registeredDevices.connectedCount`, devices.filter(item => item.connected === true).length, true);
   }
 
   private async applyDescriptionChanges(device: RunningDevice, data: unknown): Promise<void> {
@@ -635,7 +489,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       if (!target) continue;
       const stateId = `${device.baseId}.${target.id}`;
       const writable = this.canWriteTarget(device, target);
-      await this.ensureStateObject(stateId, target.name, target.uid === POWER_STATE_UID ? false : "", target.uid === POWER_STATE_UID ? "switch" : undefined, writable);
+      await this.ensureStateObject(stateId, target.name, target.uid === POWER_STATE_UID ? false : "", target.uid === POWER_STATE_UID ? "switch" : undefined, writable, this.commonMetadata(device, target, value));
       await this.writeStateMetadata(device, target, access, value.available !== false, writable, value.raw ?? value);
       if (writable) this.registerWritableState(device, stateId, this.uidStringToNumber(uid) ?? Number(uid), target.name, "value");
       if (target.name === SELECTED_PROGRAM_FEATURE || target.name === ACTIVE_PROGRAM_FEATURE) await this.prepareRootProgramAliasObjects(device);
@@ -648,8 +502,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const stateId = `${device.baseId}.${target.id}`;
     const normalizedValue = this.normalizeTargetValue(target);
     const isWritable = this.canWriteTarget(device, target);
-    await this.ensureStateObject(stateId, target.name, normalizedValue, target.uid === POWER_STATE_UID ? "switch" : undefined, isWritable);
+    await this.ensureStateObject(stateId, target.name, normalizedValue, target.uid === POWER_STATE_UID ? "switch" : undefined, isWritable, this.commonMetadata(device, target, value));
     await this.setState(stateId, normalizedValue, true);
+    await this.writeEnumCompanionStates(device, target);
     device.stateValuesByFeature.set(target.name, normalizedValue);
     await this.writeRootProgramAliasValues(device, target, normalizedValue);
     await this.writeStateMetadata(device, target, undefined, true, isWritable, value);
@@ -665,8 +520,14 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async writeRootProgramAliasValues(device: RunningDevice, target: StateTarget, value: ioBroker.StateValue): Promise<void> {
-    if (target.name === SELECTED_PROGRAM_FEATURE) await this.setState(`${device.baseId}.program.RootSelectedProgram`, value, true);
-    if (target.name === ACTIVE_PROGRAM_FEATURE) await this.setState(`${device.baseId}.program.RootActiveProgram`, value, true);
+    if (target.name === SELECTED_PROGRAM_FEATURE) {
+      await this.setState(`${device.baseId}.program.RootSelectedProgram`, value, true);
+      await this.setState(`${device.baseId}.program.selectedProgramName`, this.programDisplayName(device, String(value)), true);
+    }
+    if (target.name === ACTIVE_PROGRAM_FEATURE) {
+      await this.setState(`${device.baseId}.program.RootActiveProgram`, value, true);
+      await this.setState(`${device.baseId}.program.activeProgramName`, this.programDisplayName(device, String(value)), true);
+    }
   }
 
   private async writeStateMetadata(device: RunningDevice, target: StateTarget, access: string | undefined, available: boolean, writable: boolean, raw: unknown): Promise<void> {
@@ -689,6 +550,45 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       .sort((a, b) => a.name.localeCompare(b.name));
     await this.setState(`${device.baseId}.programs.availableJson`, JSON.stringify(programs), true);
     await this.setState(`${device.baseId}.programs.availableList`, programs.map(item => item.name).join(", "), true);
+  }
+
+
+  private commonMetadata(device: RunningDevice, target: StateTarget, raw: unknown): StateCommonMetadata | undefined {
+    const change = raw && typeof raw === "object" && !Array.isArray(raw) ? metadataFromDescriptionChange(raw as Record<string, unknown>) : undefined;
+    return mergeMetadata(metadataForFeature(target.name, target.uid, device.profile), change);
+  }
+
+  private async writeEnumCompanionStates(device: RunningDevice, target: StateTarget): Promise<void> {
+    if (!this.shouldWriteEnumCompanionStates(target)) return;
+
+    const enumType = device.profile.featureMapping.enumTypeByUid[target.uid];
+    const enumText = enumType ? device.profile.featureMapping.enumValuesByType[enumType]?.[String(target.rawValue)] : undefined;
+    if (enumText === undefined) return;
+    const baseId = `${device.baseId}.${target.id}`;
+    await this.ensureStateObject(`${baseId}_raw`, `${target.name} raw`, 0, "value");
+    await this.setState(`${baseId}_raw`, Number(target.rawValue), true);
+    await this.ensureStateObject(`${baseId}_de`, `${target.name} German`, "", "text");
+    await this.setState(`${baseId}_de`, translateEnumValue(target.name, enumText), true);
+  }
+
+  private shouldWriteEnumCompanionStates(target: StateTarget): boolean {
+    return target.category === "phases" || target.category === "status" || target.category === "program";
+  }
+
+  private rawProgramForName(device: RunningDevice, value: ioBroker.StateValue): unknown {
+    const text = String(value ?? "").trim();
+    if (!text) return undefined;
+    const matches = Object.entries(device.profile.featureMapping.featuresByUid)
+      .filter(([, featureName]) => featureName.includes(".Program."))
+      .map(([uid, featureName]) => ({ uid, featureName, display: this.programDisplayName(device, featureName) }))
+      .filter(item => item.featureName.toLowerCase() === text.toLowerCase() || item.display.toLowerCase() === text.toLowerCase() || item.featureName.split(".").pop()?.toLowerCase() === text.toLowerCase());
+
+    if (matches.length !== 1) {
+      this.log.warn(`${device.profile.haId}: cannot start program by name ${JSON.stringify(text)}, ${matches.length === 0 ? "unknown" : "not unique"}`);
+      return undefined;
+    }
+    const raw = this.uidStringToNumber(matches[0].uid);
+    return raw ?? matches[0].uid;
   }
 
   private programDisplayName(device: RunningDevice, featureName: string): string {
@@ -714,41 +614,17 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private normalizeTargetValue(target: StateTarget): ioBroker.StateValue {
     if (target.uid === POWER_STATE_UID) return Number(target.rawValue) === POWER_STATE_ON;
-    return this.toStateValue(target.value);
+    return toStateValue(target.value);
   }
 
-  private firstRecord(data: unknown): Record<string, unknown> | undefined {
-    return this.dataArray(data)[0];
-  }
+  private async setTextState(id: string, value: unknown): Promise<void> { await setTextState(this, id, value); }
+  private async setNumberState(id: string, value: unknown): Promise<void> { await setNumberState(this, id, value); }
+  private async setBooleanState(id: string, value: unknown): Promise<void> { await setBooleanState(this, id, value); }
 
-  private dataArray(data: unknown): Record<string, unknown>[] {
-    return Array.isArray(data) ? data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
-  }
+  private async ensureChannel(id: string, name: string): Promise<void> { await ensureChannel(this, id, name); }
 
-  private recordValue(value: unknown): Record<string, unknown> | undefined {
-    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-  }
-
-  private async setTextState(id: string, value: unknown): Promise<void> { await this.setState(id, value === undefined || value === null ? "" : String(value), true); }
-  private async setNumberState(id: string, value: unknown): Promise<void> { const n = Number(value); await this.setState(id, Number.isFinite(n) ? n : 0, true); }
-  private async setBooleanState(id: string, value: unknown): Promise<void> { await this.setState(id, value === true, true); }
-
-  private async ensureChannel(id: string, name: string): Promise<void> {
-    await this.setObjectNotExistsAsync(id, { type: "channel", common: { name }, native: {} });
-  }
-
-  private async ensureStateObject(id: string, name: string, value: ioBroker.StateValue, role?: string, write = false): Promise<void> {
-    const type = typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string";
-    const desiredRole = role ?? (type === "boolean" ? "indicator" : "value");
-    const existing = await this.getObjectAsync(id);
-    const common: ioBroker.StateCommon = { ...(existing?.common as ioBroker.StateCommon | undefined), name, type, role: desiredRole, read: true, write };
-    if (!existing) {
-      await this.setObjectNotExistsAsync(id, { type: "state", common, native: {} });
-      return;
-    }
-    if (existing.type !== "state" || existing.common?.type !== type || existing.common?.role !== desiredRole || existing.common?.write !== write || existing.common?.name !== name) {
-      await this.extendObjectAsync(id, { type: "state", common, native: existing.native ?? {} });
-    }
+  private async ensureStateObject(id: string, name: string, value: ioBroker.StateValue, role?: string, write = false, metadata?: StateCommonMetadata): Promise<void> {
+    await ensureStateObject(this, id, name, value, role, write, metadata);
   }
 
   private uidForFeature(profile: ApplianceProfile, featureName: string): number | undefined {

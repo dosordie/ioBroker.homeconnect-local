@@ -6,6 +6,8 @@ import { createHomeConnectSocket } from "./socketFactory";
 import { HomeConnectSocketLike } from "./socket";
 import { ConnectionType, HcMessage } from "./types";
 
+const INITIAL_READ_RETRIES = 1;
+
 export interface HomeConnectClientOptions {
   host: string;
   connectionType: ConnectionType | string;
@@ -16,6 +18,11 @@ export interface HomeConnectClientOptions {
   log?: Pick<ioBroker.Logger, "debug" | "info" | "warn" | "error">;
   messageHandler?: (message: HcMessage) => Promise<void> | void;
   closeHandler?: (error?: Error) => void;
+}
+
+interface PartialMessageIdentity {
+  msgID?: number;
+  resource?: string;
 }
 
 export class HomeConnectClient {
@@ -83,11 +90,26 @@ export class HomeConnectClient {
     const resources = ["/ro/allDescriptionChanges", "/ro/allMandatoryValues"];
 
     for (const resource of resources) {
-      try {
-        const response = await this.sendSync({ resource, action: "GET" }, 20000);
-        await this.forwardMessage(response);
-      } catch (error) {
-        this.log?.warn(`GET ${resource} failed: ${String(error)}`);
+      let lastError: unknown;
+
+      for (let attempt = 0; attempt <= INITIAL_READ_RETRIES; attempt += 1) {
+        try {
+          const response = await this.sendSync({ resource, action: "GET" }, 20000);
+          await this.forwardMessage(response);
+          lastError = undefined;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < INITIAL_READ_RETRIES && isMalformedJsonError(error)) {
+            this.log?.warn(`GET ${resource} returned malformed JSON, retrying once: ${String(error)}`);
+            continue;
+          }
+          break;
+        }
+      }
+
+      if (lastError !== undefined) {
+        this.log?.warn(`GET ${resource} failed: ${String(lastError)}`);
       }
     }
   }
@@ -158,7 +180,14 @@ export class HomeConnectClient {
     try {
       message = parseMessage(payload);
     } catch (error) {
-      this.log?.warn(`Unable to parse Home Connect message: ${String(error)}`);
+      const identity = extractPartialMessageIdentity(payload);
+      const parseError = new Error(`Malformed Home Connect JSON${identity.resource ? ` for ${identity.resource}` : ""}: ${String(error)}`);
+
+      this.log?.warn(parseError.message);
+      if (identity.msgID !== undefined && this.pendingResponses.reject(identity.msgID, parseError)) {
+        return;
+      }
+
       return;
     }
 
@@ -194,4 +223,19 @@ export class HomeConnectClient {
     this.pendingResponses.rejectAll(new Error(`Socket closed: ${code} ${reason}`));
     this.closeHandler?.();
   }
+}
+
+function extractPartialMessageIdentity(payload: string): PartialMessageIdentity {
+  const msgIdMatch = payload.match(/"msgID"\s*:\s*(\d+)/);
+  const resourceMatch = payload.match(/"resource"\s*:\s*"([^"]+)"/);
+  const msgID = msgIdMatch ? Number(msgIdMatch[1]) : undefined;
+
+  return {
+    msgID: Number.isFinite(msgID) ? msgID : undefined,
+    resource: resourceMatch?.[1],
+  };
+}
+
+function isMalformedJsonError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith("Malformed Home Connect JSON");
 }

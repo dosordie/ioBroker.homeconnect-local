@@ -2,9 +2,13 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.13",
+    "version": "0.0.14",
     "icon": "homeconnect-local.svg",
     "news": {
+      "0.0.14": {
+        "en": "Completes internal refactoring by using shared constants, runtime types and value conversion helpers.",
+        "de": "Schließt internes Refactoring ab und nutzt gemeinsame Konstanten, Runtime-Typen und Hilfsfunktionen zur Wertumwandlung."
+      },
       "0.0.13": {
         "en": "Parses enum descriptions from FeatureMapping.xml, including dishwasher ProgramPhase labels.",
         "de": "Liest Enum-Beschreibungen aus der FeatureMapping.xml, inklusive Geschirrspüler-ProgramPhase-Labels."
@@ -70,6 +74,7 @@
     "enabled": true,
     "readme": "https://github.com/dosordie/ioBroker.homeconnect-local/blob/main/README.md",
     "loglevel": "info",
+    "restartAdapters": ["homeconnect-local"],
     "type": "household",
     "compact": true,
     "connectionType": "local",
@@ -79,7 +84,7 @@
     "globalDependencies": [{"admin": ">=6.0.0"}]
   },
   "native": {
-    "profilePath": "",
+    "profilePath": "/opt/iobroker/iobroker-data/files/0_userdata.0/homeconnect-lokal-zip",
     "appName": "ioBroker HomeConnect Local",
     "appId": "iobroker-homeconnect-local",
     "reconnectInterval": 30,

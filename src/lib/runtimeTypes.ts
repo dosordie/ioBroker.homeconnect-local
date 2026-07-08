@@ -16,7 +16,7 @@ export interface RunningDevice {
   stateValuesByFeature: Map<string, ioBroker.StateValue>;
 }
 
-export type WritableStateKind = "value" | "command" | "startProgram" | "startProgramWithOptions";
+export type WritableStateKind = "value" | "command" | "startProgram" | "startProgramWithOptions" | "startProgramName";
 
 export interface WritableState {
   deviceHaId: string;

@@ -164,20 +164,21 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       return;
     }
 
-    if (device.profile.connectionType !== "AES") {
-      this.log.warn(`${device.profile.haId}: connectionType ${device.profile.connectionType} is not implemented yet. AES devices only for this PoC.`);
+    if (device.profile.connectionType !== "AES" && device.profile.connectionType !== "TLS") {
+      this.log.warn(`${device.profile.haId}: unsupported connectionType ${device.profile.connectionType}. Expected AES or TLS.`);
       return;
     }
 
-    if (!device.profile.iv) {
+    if (device.profile.connectionType === "AES" && !device.profile.iv) {
       this.log.warn(`${device.profile.haId}: AES profile has no IV. Skipping device.`);
       return;
     }
 
-    this.log.info(`${device.profile.haId}: connecting to ${device.config.host} via AES`);
+    this.log.info(`${device.profile.haId}: connecting to ${device.config.host} via ${device.profile.connectionType}`);
 
     const client = new HomeConnectClient({
       host: device.config.host as string,
+      connectionType: device.profile.connectionType,
       key: device.profile.key,
       iv: device.profile.iv,
       appName: this.nativeConfig.appName || "ioBroker HomeConnect Local",

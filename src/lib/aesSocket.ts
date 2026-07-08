@@ -54,6 +54,7 @@ export class HomeConnectAesSocket extends EventEmitter {
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(this.url, { perMessageDeflate: false });
       this.ws = ws;
+      let settled = false;
 
       const timeout = setTimeout(() => {
         cleanup();
@@ -64,24 +65,31 @@ export class HomeConnectAesSocket extends EventEmitter {
       const cleanup = (): void => {
         clearTimeout(timeout);
         ws.off("open", onOpen);
-        ws.off("error", onError);
+        ws.off("error", onConnectError);
       };
 
       const onOpen = (): void => {
+        settled = true;
         cleanup();
         resolve();
       };
 
-      const onError = (error: Error): void => {
+      const onConnectError = (error: Error): void => {
+        settled = true;
         cleanup();
         reject(error);
       };
 
       ws.once("open", onOpen);
-      ws.once("error", onError);
+      ws.once("error", onConnectError);
       ws.on("message", data => this.handleIncoming(data));
       ws.on("close", (code, reason) => this.emit("close", code, reason.toString("utf8")));
-      ws.on("error", error => this.emit("error", error));
+      ws.on("error", error => {
+        if (!settled) {
+          return;
+        }
+        this.safeEmitError(error);
+      });
     });
   }
 
@@ -176,12 +184,18 @@ export class HomeConnectAesSocket extends EventEmitter {
     this.decipher.setAutoPadding(false);
   }
 
+  private safeEmitError(error: Error): void {
+    if (this.listenerCount("error") > 0) {
+      this.emit("error", error);
+    }
+  }
+
   private handleIncoming(data: WebSocket.RawData): void {
     try {
       const payload = rawDataToBuffer(data);
       this.emit("message", this.decrypt(payload));
     } catch (error) {
-      this.emit("error", error instanceof Error ? error : new Error(String(error)));
+      this.safeEmitError(error instanceof Error ? error : new Error(String(error)));
     }
   }
 
@@ -228,5 +242,5 @@ function rawDataToBuffer(data: WebSocket.RawData): Buffer {
     return Buffer.concat(data);
   }
 
-  return Buffer.from(data);
+  return Buffer.from(data as ArrayBuffer);
 }

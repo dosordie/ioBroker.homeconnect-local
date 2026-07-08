@@ -6,7 +6,8 @@ import { loadProfiles } from "./lib/profile";
 import { StateMapper } from "./lib/stateMapper";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue } from "./lib/types";
 
-const POWER_STATE_UID = 0x021b;
+const POWER_STATE_UID = "021B";
+const POWER_STATE_UID_NUMBER = 0x021b;
 const POWER_STATE_OFF = 1;
 const POWER_STATE_ON = 2;
 
@@ -41,7 +42,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     await this.ensureInfoConnectionObject();
     await this.setState("info.connection", false, true);
-    await this.subscribeStatesAsync("*.commands.*");
+    await this.subscribeStatesAsync("*.settings.PowerState");
 
     this.log.debug(`Native config at startup: ${JSON.stringify(this.currentConfig)}`);
 
@@ -127,7 +128,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(`${baseId}.info.connectionType`, "Connection type", "", "text");
     await this.setState(`${baseId}.info.connectionType`, String(profile.connectionType), true);
 
-    for (const channel of ["status", "program", "phases", "options", "settings", "events", "programs", "raw", "commands"]) {
+    for (const channel of ["status", "program", "phases", "options", "settings", "events", "programs", "raw"]) {
       await this.setObjectNotExistsAsync(`${baseId}.${channel}`, {
         type: "channel",
         common: { name: channel },
@@ -135,17 +136,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       });
     }
 
-    await this.ensureStateObject(`${baseId}.commands.power`, "Power command", false, "switch");
-    await this.extendObjectAsync(`${baseId}.commands.power`, {
-      common: {
-        name: "Power command",
-        type: "boolean",
-        role: "switch",
-        read: true,
-        write: true,
-        def: false,
-      },
-    });
+    await this.ensureStateObject(`${baseId}.settings.PowerState`, "BSH.Common.Setting.PowerState", false, "switch", true);
   }
 
   private async connectDevice(device: RunningDevice): Promise<void> {
@@ -200,7 +191,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
 
     const relativeId = id.startsWith(`${this.namespace}.`) ? id.slice(this.namespace.length + 1) : id;
-    const match = relativeId.match(/^(.+)\.commands\.power$/);
+    const match = relativeId.match(/^(.+)\.settings\.PowerState$/);
     if (!match) {
       return;
     }
@@ -208,20 +199,33 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const baseId = match[1];
     const device = Array.from(this.devices.values()).find(item => item.baseId === baseId);
     if (!device?.client) {
-      this.log.warn(`${baseId}: cannot write power state, device is not connected`);
+      this.log.warn(`${baseId}: cannot write PowerState, device is not connected`);
       return;
     }
 
-    const powerOn = state.val === true || state.val === "true" || state.val === 1 || state.val === "1" || String(state.val).toLowerCase() === "on";
+    const powerOn = this.stateValueToPowerBoolean(state.val);
     const value = powerOn ? POWER_STATE_ON : POWER_STATE_OFF;
 
     try {
       this.log.info(`${device.profile.haId}: writing PowerState ${powerOn ? "On" : "Off"} (${value})`);
-      await device.client.writeValue(POWER_STATE_UID, value);
-      await this.setState(`${device.baseId}.commands.power`, powerOn, true);
+      await device.client.writeValue(POWER_STATE_UID_NUMBER, value);
+      await this.setState(`${device.baseId}.settings.PowerState`, powerOn, true);
     } catch (error) {
       this.log.warn(`${device.profile.haId}: writing PowerState failed: ${String(error)}`);
     }
+  }
+
+  private stateValueToPowerBoolean(value: ioBroker.StateValue): boolean {
+    if (value === true || value === 1) {
+      return true;
+    }
+
+    if (value === false || value === 0) {
+      return false;
+    }
+
+    const text = String(value).toLowerCase();
+    return text === "on" || text.endsWith(".on") || text === "true" || text === "1" || text === "ein";
   }
 
   private scheduleReconnect(device: RunningDevice, error?: Error): void {
@@ -268,16 +272,26 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     const stateId = `${device.baseId}.${target.id}`;
     const rawStateId = `${device.baseId}.raw.uid_${target.uid}`;
-    const normalizedValue = this.normalizeStateValue(target.value);
+    const normalizedValue = this.normalizeTargetValue(target);
+    const isWritable = target.uid === POWER_STATE_UID;
+    const role = target.uid === POWER_STATE_UID ? "switch" : undefined;
     const rawValue = JSON.stringify(value);
 
-    await this.ensureStateObject(stateId, target.name, normalizedValue);
+    await this.ensureStateObject(stateId, target.name, normalizedValue, role, isWritable);
     await this.setState(stateId, normalizedValue, true);
 
     if (this.currentConfig.debugRaw) {
       await this.ensureStateObject(rawStateId, `Raw ${target.uid} ${target.name}`, "", "json");
       await this.setState(rawStateId, rawValue, true);
     }
+  }
+
+  private normalizeTargetValue(target: { uid: string; value: unknown; rawValue: unknown }): ioBroker.StateValue {
+    if (target.uid === POWER_STATE_UID) {
+      return Number(target.rawValue) === POWER_STATE_ON;
+    }
+
+    return this.normalizeStateValue(target.value);
   }
 
   private normalizeStateValue(value: unknown): ioBroker.StateValue {
@@ -292,7 +306,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     return JSON.stringify(value);
   }
 
-  private async ensureStateObject(id: string, name: string, value: ioBroker.StateValue, role?: string): Promise<void> {
+  private async ensureStateObject(id: string, name: string, value: ioBroker.StateValue, role?: string, write = false): Promise<void> {
     const type = typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string";
     const desiredRole = role ?? (type === "boolean" ? "indicator" : "value");
     const existing = await this.getObjectAsync(id);
@@ -303,7 +317,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       type,
       role: desiredRole,
       read: true,
-      write: false,
+      write,
     };
 
     if (!existing) {
@@ -315,7 +329,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       return;
     }
 
-    if (existing.type !== "state" || existing.common?.type !== type || existing.common?.role !== desiredRole) {
+    if (existing.type !== "state" || existing.common?.type !== type || existing.common?.role !== desiredRole || existing.common?.write !== write) {
       await this.extendObjectAsync(id, {
         type: "state",
         common,

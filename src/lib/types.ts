@@ -49,7 +49,7 @@ export interface AdapterNativeConfig {
   devices?: ConfiguredDevice[];
 }
 
-export type HcAction = "GET" | "POST" | "RESPONSE" | "NOTIFY";
+export type HcAction = "GET" | "POST" | "PUT" | "RESPONSE" | "NOTIFY";
 
 export interface HcMessage {
   sID?: number;

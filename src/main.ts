@@ -356,10 +356,11 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       if (rawValue === undefined) return;
 
       if (writableState.kind === "startProgramWithOptions") {
-        await this.writeStartProgramWithOptions(device, writableState.uid, rawValue);
-      } else if (writableState.kind === "startProgramName") {
-        this.log.info(`${device.profile.haId}: starting program by name = ${JSON.stringify(rawValue)}`);
-        await device.client.writeValue(writableState.uid, rawValue);
+        await this.writeStartProgram(device, rawValue, await this.startOptionValuesFromState(device));
+      } else if (writableState.kind === "startProgram" || writableState.kind === "startProgramName" || writableState.featureName === ACTIVE_PROGRAM_FEATURE) {
+        await this.writeStartProgram(device, rawValue, []);
+      } else if (writableState.featureName === SELECTED_PROGRAM_FEATURE) {
+        await this.writeSelectedProgram(device, rawValue, []);
       } else {
         const programKey = this.programKeyFromRaw(writableState, rawValue);
         const programSuffix = programKey ? ` (${programKey})` : "";
@@ -381,15 +382,6 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private async valueForWrite(device: RunningDevice, writableState: WritableState, value: ioBroker.StateValue): Promise<unknown> {
     if (writableState.kind === "command") return isTruthyWrite(value) ? true : undefined;
     if (writableState.kind === "startProgramName") return this.rawProgramForName(device, value);
-    if (writableState.featureName === SELECTED_PROGRAM_FEATURE || writableState.featureName === ACTIVE_PROGRAM_FEATURE) {
-      const key = this.programKeyForWrite(device, value, writableState.featureName);
-      if (key === undefined) return undefined;
-      const rawUid = this.rawProgramUidForKey(device, key);
-      if (rawUid === undefined) {
-        this.log.warn(`${device.profile.haId}: cannot resolve program ${JSON.stringify(value)} to raw UID, not writing`);
-      }
-      return rawUid;
-    }
     if (writableState.kind === "startProgram" || writableState.kind === "startProgramWithOptions") {
       if (!isTruthyWrite(value)) return undefined;
       const selectedProgramUid = this.uidForFeature(device.profile, SELECTED_PROGRAM_FEATURE);
@@ -405,25 +397,44 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         this.log.warn(`${device.profile.haId}: cannot start program, no selected program is known`);
         return undefined;
       }
-      const raw = stateValueToRaw(device.profile, selectedProgramUid, selectedProgramState.val);
-      this.log.info(`${device.profile.haId}: starting selected program ${JSON.stringify(raw)} (${this.programDisplayName(device, String(selectedProgramState.val))})`);
-      return raw;
+      return this.rawProgramForName(device, selectedProgramState.val);
+    }
+    if (writableState.featureName === SELECTED_PROGRAM_FEATURE || writableState.featureName === ACTIVE_PROGRAM_FEATURE) {
+      const key = this.programKeyForWrite(device, value, writableState.featureName);
+      if (key === undefined) return undefined;
+      const rawUid = this.rawProgramUidForKey(device, key);
+      if (rawUid === undefined) {
+        this.log.warn(`${device.profile.haId}: cannot resolve program ${JSON.stringify(value)} to raw UID, not writing`);
+      }
+      return rawUid;
     }
     if (writableState.uid === POWER_STATE_UID_NUMBER) return stateValueToPowerBoolean(value) ? POWER_STATE_ON : POWER_STATE_OFF;
     return stateValueToRaw(device.profile, writableState.uid, value);
   }
 
-  private async writeStartProgramWithOptions(device: RunningDevice, activeProgramUid: number, selectedProgramRaw: unknown): Promise<void> {
-    if (!device.client) throw new Error("Device is not connected");
+  private async startOptionValuesFromState(device: RunningDevice): Promise<Array<{ uid: number; value: unknown }>> {
     const optionsState = await this.getStateAsync(`${device.baseId}.program.startOptionsJson`);
-    const options = parseJsonObject(optionsState?.val);
-    const values = this.buildStartOptionValues(device, options);
-    for (const entry of values) {
-      this.log.info(`${device.profile.haId}: writing start option uid ${entry.uid} = ${JSON.stringify(entry.value)}`);
-      await device.client.writeValue(entry.uid, entry.value);
-    }
-    this.log.info(`${device.profile.haId}: starting selected program = ${JSON.stringify(selectedProgramRaw)}`);
-    await device.client.writeValue(activeProgramUid, selectedProgramRaw);
+    return this.buildStartOptionValues(device, parseJsonObject(optionsState?.val));
+  }
+
+  private async writeStartProgram(device: RunningDevice, selectedProgramRaw: unknown, options: Array<{ uid: number; value: unknown }>): Promise<void> {
+    if (!device.client) throw new Error("Device is not connected");
+    const programUid = Number(selectedProgramRaw);
+    if (!Number.isFinite(programUid)) throw new Error(`Invalid program UID ${JSON.stringify(selectedProgramRaw)}`);
+    const programKey = this.programKeyFromRawUid(device, programUid);
+    const programSuffix = programKey ? ` (${programKey})` : "";
+    this.log.info(`${device.profile.haId}: starting program via /ro/activeProgram = ${programUid}${programSuffix}`);
+    await device.client.startProgram(programUid, options);
+  }
+
+  private async writeSelectedProgram(device: RunningDevice, selectedProgramRaw: unknown, options: Array<{ uid: number; value: unknown }>): Promise<void> {
+    if (!device.client) throw new Error("Device is not connected");
+    const programUid = Number(selectedProgramRaw);
+    if (!Number.isFinite(programUid)) throw new Error(`Invalid program UID ${JSON.stringify(selectedProgramRaw)}`);
+    const programKey = this.programKeyFromRawUid(device, programUid);
+    const programSuffix = programKey ? ` (${programKey})` : "";
+    this.log.info(`${device.profile.haId}: selecting program via /ro/selectedProgram = ${programUid}${programSuffix}`);
+    await device.client.selectProgram(programUid, options);
   }
 
   private buildStartOptionValues(device: RunningDevice, options: Record<string, unknown>): Array<{ uid: number; value: unknown }> {
@@ -458,7 +469,11 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     if (!device) return undefined;
     if (typeof rawValue === "string" && rawValue.includes(".Program.")) return rawValue;
     if (typeof rawValue !== "number") return undefined;
-    const uid = normalizeUid(rawValue);
+    return this.programKeyFromRawUid(device, rawValue);
+  }
+
+  private programKeyFromRawUid(device: RunningDevice, rawUid: number): string | undefined {
+    const uid = normalizeUid(rawUid);
     return uid ? device.profile.featureMapping.featuresByUid[uid] : undefined;
   }
 
@@ -534,7 +549,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const target = device.mapper.toStateTarget(value);
     if (!target) return;
     const stateId = `${device.baseId}.${target.id}`;
-    const normalizedValue = this.normalizeTargetValue(target);
+    const normalizedValue = this.normalizeTargetValue(device, target);
     const isWritable = this.canWriteTarget(device, target);
     await this.ensureStateObject(stateId, target.name, normalizedValue, target.uid === POWER_STATE_UID ? "switch" : undefined, isWritable, this.commonMetadata(device, target, value));
     await this.setState(stateId, normalizedValue, true);
@@ -663,12 +678,20 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private initialTargetValue(target: StateTarget): ioBroker.StateValue {
     if (target.uid === POWER_STATE_UID) return false;
+    if (target.name === ACTIVE_PROGRAM_FEATURE || target.name === SELECTED_PROGRAM_FEATURE) return "";
     if (this.isProgramProgress(target)) return 0;
     return "";
   }
 
-  private normalizeTargetValue(target: StateTarget): ioBroker.StateValue {
+  private normalizeTargetValue(device: RunningDevice, target: StateTarget): ioBroker.StateValue {
     if (target.uid === POWER_STATE_UID) return Number(target.rawValue) === POWER_STATE_ON;
+    if (target.name === ACTIVE_PROGRAM_FEATURE || target.name === SELECTED_PROGRAM_FEATURE) {
+      if (target.rawValue === 0 || target.rawValue === null || target.rawValue === undefined) return "";
+      if (typeof target.value === "string" && target.value.includes(".Program.")) return target.value;
+      if (typeof target.rawValue === "number") return this.programKeyFromRawUid(device, target.rawValue) ?? "";
+      if (typeof target.rawValue === "string" && target.rawValue.includes(".Program.")) return target.rawValue;
+      return "";
+    }
     if (this.isProgramProgress(target)) {
       const progress = Number(target.rawValue);
       return Number.isFinite(progress) ? progress : 0;

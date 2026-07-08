@@ -8,12 +8,13 @@ export async function ensureStateObject(adapter: ioBroker.Adapter, id: string, n
   const desiredRole = role ?? (type === "boolean" ? "indicator" : "value");
   const sanitizedMetadata = sanitizeMetadataForType(metadata, type);
   const existing = await adapter.getObjectAsync(id);
-  const common: ioBroker.StateCommon = { ...(existing?.common as ioBroker.StateCommon | undefined), name, type, role: desiredRole, read: true, write, ...sanitizedMetadata };
+  const existingCommon = sanitizeMetadataForType((existing?.common as ioBroker.StateCommon | undefined) ?? {}, type);
+  const common: ioBroker.StateCommon = { ...existingCommon, name, type, role: desiredRole, read: true, write, ...sanitizedMetadata };
   if (!existing) {
     await adapter.setObjectNotExistsAsync(id, { type: "state", common, native: {} });
     return;
   }
-  if (existing.type !== "state" || existing.common?.type !== type || existing.common?.role !== desiredRole || existing.common?.write !== write || existing.common?.name !== name || commonChanged(existing.common as ioBroker.StateCommon | undefined, sanitizedMetadata)) {
+  if (existing.type !== "state" || existing.common?.type !== type || existing.common?.role !== desiredRole || existing.common?.write !== write || existing.common?.name !== name || commonChanged(existing.common as ioBroker.StateCommon | undefined, common)) {
     await adapter.extendObjectAsync(id, { type: "state", common, native: existing.native ?? {} });
   }
 }

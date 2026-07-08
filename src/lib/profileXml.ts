@@ -1,4 +1,6 @@
-import { FeatureMapping } from "./types";
+import { XMLParser } from "fast-xml-parser";
+
+import { FeatureMapping, ProgramOptionDescription } from "./types";
 import { normalizeUid } from "./ids";
 
 export function parseFeatureMapping(featureMappingXml: string, deviceDescriptionXml: string): FeatureMapping {
@@ -9,6 +11,7 @@ export function parseFeatureMapping(featureMappingXml: string, deviceDescription
       ...parseDeviceDescriptionEnumValues(deviceDescriptionXml),
       ...parseFeatureMappingEnumValues(featureMappingXml),
     },
+    programOptionsByUid: parseProgramOptions(deviceDescriptionXml),
   };
 }
 
@@ -103,4 +106,110 @@ function parseFeatureMappingEnumValues(xml: string): Record<string, Record<strin
   }
 
   return result;
+}
+
+
+function parseProgramOptions(xml: string): Record<string, ProgramOptionDescription[]> {
+  const parsed = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: "",
+    parseAttributeValue: false,
+    parseTagValue: false,
+    trimValues: true,
+  }).parse(xml) as unknown;
+  const result: Record<string, ProgramOptionDescription[]> = {};
+
+  visitXml(parsed, (name, element) => {
+    if (name.toLowerCase() !== "program" || !isXmlElement(element)) return;
+
+    const programUid = uidFromElement(element, ["uid", "refUID", "refUid"]);
+    if (!programUid) return;
+
+    const options = parseOptions(element);
+    if (options.length > 0) {
+      result[programUid] = options;
+    }
+  });
+
+  return result;
+}
+
+function parseOptions(element: Record<string, unknown>): ProgramOptionDescription[] {
+  const result = new Map<string, ProgramOptionDescription>();
+  const addOption = (optionElement: unknown): void => {
+    if (!isXmlElement(optionElement)) return;
+    const refUID = uidFromElement(optionElement, ["refUID", "refUid", "uid"]);
+    if (!refUID) return;
+
+    result.set(refUID, {
+      refUID,
+      access: stringAttribute(optionElement, "access"),
+      available: booleanAttribute(optionElement, "available"),
+      default: optionElement.default,
+    });
+  };
+
+  for (const option of arrayValues(element.option)) addOption(option);
+
+  for (const containerName of ["options", "programOptions"]) {
+    for (const container of arrayValues(element[containerName])) {
+      if (!isXmlElement(container)) continue;
+      for (const option of arrayValues(container.option)) addOption(option);
+      for (const option of arrayValues(container.optionRef)) addOption(option);
+      for (const option of arrayValues(container.programOption)) addOption(option);
+    }
+  }
+
+  return [...result.values()];
+}
+
+function visitXml(value: unknown, visitor: (name: string, element: unknown) => void): void {
+  if (Array.isArray(value)) {
+    for (const item of value) visitXml(item, visitor);
+    return;
+  }
+
+  if (!isXmlElement(value)) return;
+
+  for (const [key, child] of Object.entries(value)) {
+    if (isAttributeOrTextKey(key)) continue;
+    for (const item of arrayValues(child)) {
+      visitor(key, item);
+      visitXml(item, visitor);
+    }
+  }
+}
+
+function uidFromElement(element: Record<string, unknown>, names: string[]): string | undefined {
+  for (const name of names) {
+    const uid = normalizeUid(stringAttribute(element, name));
+    if (uid) return uid;
+  }
+  return undefined;
+}
+
+function stringAttribute(element: Record<string, unknown>, name: string): string | undefined {
+  const value = element[name];
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : undefined;
+}
+
+function booleanAttribute(element: Record<string, unknown>, name: string): boolean | undefined {
+  const value = stringAttribute(element, name);
+  if (value === undefined) return undefined;
+  if (/^(true|1)$/i.test(value)) return true;
+  if (/^(false|0)$/i.test(value)) return false;
+  return undefined;
+}
+
+function arrayValues(value: unknown): unknown[] {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function isXmlElement(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAttributeOrTextKey(key: string): boolean {
+  return key === "#text" || key === "__text";
 }

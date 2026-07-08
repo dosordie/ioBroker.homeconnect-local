@@ -2,16 +2,16 @@ export async function ensureChannel(adapter: ioBroker.Adapter, id: string, name:
   await adapter.setObjectNotExistsAsync(id, { type: "channel", common: { name }, native: {} });
 }
 
-export async function ensureStateObject(adapter: ioBroker.Adapter, id: string, name: string, value: ioBroker.StateValue, role?: string, write = false): Promise<void> {
+export async function ensureStateObject(adapter: ioBroker.Adapter, id: string, name: string, value: ioBroker.StateValue, role?: string, write = false, metadata: Partial<ioBroker.StateCommon> = {}): Promise<void> {
   const type = typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string";
   const desiredRole = role ?? (type === "boolean" ? "indicator" : "value");
   const existing = await adapter.getObjectAsync(id);
-  const common: ioBroker.StateCommon = { ...(existing?.common as ioBroker.StateCommon | undefined), name, type, role: desiredRole, read: true, write };
+  const common: ioBroker.StateCommon = { ...(existing?.common as ioBroker.StateCommon | undefined), name, type, role: desiredRole, read: true, write, ...metadata };
   if (!existing) {
     await adapter.setObjectNotExistsAsync(id, { type: "state", common, native: {} });
     return;
   }
-  if (existing.type !== "state" || existing.common?.type !== type || existing.common?.role !== desiredRole || existing.common?.write !== write || existing.common?.name !== name) {
+  if (existing.type !== "state" || existing.common?.type !== type || existing.common?.role !== desiredRole || existing.common?.write !== write || existing.common?.name !== name || commonChanged(existing.common as ioBroker.StateCommon | undefined, metadata)) {
     await adapter.extendObjectAsync(id, { type: "state", common, native: existing.native ?? {} });
   }
 }
@@ -27,4 +27,8 @@ export async function setNumberState(adapter: ioBroker.Adapter, id: string, valu
 
 export async function setBooleanState(adapter: ioBroker.Adapter, id: string, value: unknown): Promise<void> {
   await adapter.setState(id, value === true, true);
+}
+
+function commonChanged(existing: ioBroker.StateCommon | undefined, metadata: Partial<ioBroker.StateCommon>): boolean {
+  return Object.entries(metadata).some(([key, value]) => JSON.stringify((existing as Record<string, unknown> | undefined)?.[key]) !== JSON.stringify(value));
 }

@@ -6,6 +6,10 @@ import { loadProfiles } from "./lib/profile";
 import { StateMapper } from "./lib/stateMapper";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue } from "./lib/types";
 
+const POWER_STATE_UID = 0x021b;
+const POWER_STATE_OFF = 1;
+const POWER_STATE_ON = 2;
+
 interface RunningDevice {
   baseId: string;
   config: ConfiguredDevice;
@@ -29,6 +33,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     this.on("ready", () => void this.onReady());
     this.on("unload", callback => void this.onUnload(callback));
+    this.on("stateChange", (id, state) => void this.onStateChange(id, state));
   }
 
   private async onReady(): Promise<void> {
@@ -36,6 +41,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     await this.ensureInfoConnectionObject();
     await this.setState("info.connection", false, true);
+    await this.subscribeStatesAsync("*.commands.*");
 
     this.log.debug(`Native config at startup: ${JSON.stringify(this.currentConfig)}`);
 
@@ -121,13 +127,25 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(`${baseId}.info.connectionType`, "Connection type", "", "text");
     await this.setState(`${baseId}.info.connectionType`, String(profile.connectionType), true);
 
-    for (const channel of ["status", "program", "phases", "options", "settings", "events", "programs", "raw"]) {
+    for (const channel of ["status", "program", "phases", "options", "settings", "events", "programs", "raw", "commands"]) {
       await this.setObjectNotExistsAsync(`${baseId}.${channel}`, {
         type: "channel",
         common: { name: channel },
         native: {},
       });
     }
+
+    await this.ensureStateObject(`${baseId}.commands.power`, "Power command", false, "switch");
+    await this.extendObjectAsync(`${baseId}.commands.power`, {
+      common: {
+        name: "Power command",
+        type: "boolean",
+        role: "switch",
+        read: true,
+        write: true,
+        def: false,
+      },
+    });
   }
 
   private async connectDevice(device: RunningDevice): Promise<void> {
@@ -173,6 +191,36 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.updateGlobalConnectionState();
       this.log.warn(`${device.profile.haId}: connection failed: ${String(error)}`);
       this.scheduleReconnect(device, error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private async onStateChange(id: string, state: ioBroker.State | null | undefined): Promise<void> {
+    if (!state || state.ack) {
+      return;
+    }
+
+    const relativeId = id.startsWith(`${this.namespace}.`) ? id.slice(this.namespace.length + 1) : id;
+    const match = relativeId.match(/^(.+)\.commands\.power$/);
+    if (!match) {
+      return;
+    }
+
+    const baseId = match[1];
+    const device = Array.from(this.devices.values()).find(item => item.baseId === baseId);
+    if (!device?.client) {
+      this.log.warn(`${baseId}: cannot write power state, device is not connected`);
+      return;
+    }
+
+    const powerOn = state.val === true || state.val === "true" || state.val === 1 || state.val === "1" || String(state.val).toLowerCase() === "on";
+    const value = powerOn ? POWER_STATE_ON : POWER_STATE_OFF;
+
+    try {
+      this.log.info(`${device.profile.haId}: writing PowerState ${powerOn ? "On" : "Off"} (${value})`);
+      await device.client.writeValue(POWER_STATE_UID, value);
+      await this.setState(`${device.baseId}.commands.power`, powerOn, true);
+    } catch (error) {
+      this.log.warn(`${device.profile.haId}: writing PowerState failed: ${String(error)}`);
     }
   }
 

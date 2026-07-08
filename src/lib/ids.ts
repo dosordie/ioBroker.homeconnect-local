@@ -18,7 +18,7 @@ export function normalizeUid(uid: number | string | undefined): string | undefin
     return numeric.toString(16).toUpperCase().padStart(4, "0");
   }
 
-  return trimmed.toUpperCase();
+  return undefined;
 }
 
 export function sanitizeObjectId(value: string): string {

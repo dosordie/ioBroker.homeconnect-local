@@ -32,6 +32,10 @@ test("German ProcessPhase enum translations include laundry phases", () => {
   );
   assert.equal(translateEnumValue("LaundryCare.Common.Option.ProcessPhase", "Washing", 5), "Waschen");
   assert.equal(translateEnumValue("LaundryCare.Common.Option.ProcessPhase", "Drying", 21), "Trocknen");
+  assert.equal(
+    translateEnumValue("LaundryCare.Common.Option.ProcessPhase", "ColdRefreshing", 25),
+    "Kalt auffrischen",
+  );
 });
 
 test("German enum translations include EndTrigger and FlexStart", () => {
@@ -43,6 +47,21 @@ test("German enum translations include EndTrigger and FlexStart", () => {
     translateEnumValue("BSH.Common.Status.FlexStart", "Scheduled", 3),
     "Geplant",
   );
+});
+
+test("German enum translations include appliance companion values", () => {
+  assert.equal(translateEnumValue("BSH.Common.Status.DoorState", "Locked", 2), "Verriegelt");
+  assert.equal(translateEnumValue("LaundryCare.Washer.Option.IDos1Level", "Filled", 1), "Gefüllt");
+  assert.equal(translateEnumValue("LaundryCare.Washer.Option.IDos2Level", "Poor", 2), "Niedrig");
+  assert.equal(translateEnumValue("BSH.Common.Status.StopWatchState", "Running", 2), "Läuft");
+  assert.equal(
+    translateEnumValue("LaundryCare.Common.Status.OperationStatus", "NoProgramFound", 3),
+    "Kein Programm gefunden",
+  );
+  assert.equal(translateEnumValue("LaundryCare.Common.Option.TextileType", "Cotton", 1), "Baumwolle");
+  assert.equal(translateEnumValue("Cooking.Common.Status.State", "ResiduelHeat", 3), "Restwärme");
+  assert.equal(translateEnumValue("Cooking.Hob.Option.PowerLevel", "KeepWarm", 1), "Warmhalten");
+  assert.equal(translateEnumValue("Cooking.Hob.Option.FryingSensorLevel", "Level03", 3), "Stufe 3");
 });
 
 test("forecast metadata uses percent units", () => {

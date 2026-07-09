@@ -619,3 +619,126 @@ test("ProgramAborted event summary text is neutral", () => {
   const items = activeEventSummaryItems(new Map([["BSH.Common.Event.ProgramAborted", "Present"]]));
   assert.equal(activeEventSummaryTextDe(items), "Abbruchmeldung offen");
 });
+
+const { parseMessage } = require("../build/lib/message");
+const { parseRepairedAllMandatoryValuesResponse } = require("../build/lib/client");
+const { recordHomeConnectFrame, shouldHeartbeatDevice } = require("../build/lib/runtimeTypes");
+
+function watchdogDevice(overrides = {}) {
+  return {
+    connected: true,
+    reconnecting: false,
+    client: { sendSync: async () => ({ resource: "/ci/services", action: "RESPONSE" }) },
+    ...overrides,
+  };
+}
+
+test("watchdog timestamps are updated for every frame and RO frames", () => {
+  const device = watchdogDevice();
+  recordHomeConnectFrame(device, "/ni/info", 1000);
+  assert.equal(device.lastRxAt, 1000);
+  assert.equal(device.lastRoRxAt, undefined);
+  recordHomeConnectFrame(device, "/ro/values", 2000);
+  assert.equal(device.lastRxAt, 2000);
+  assert.equal(device.lastRoRxAt, 2000);
+  recordHomeConnectFrame(device, "/ro/descriptionChange", 3000);
+  assert.equal(device.lastRoRxAt, 3000);
+  recordHomeConnectFrame(device, "/ro/allMandatoryValues", 4000);
+  assert.equal(device.lastRoRxAt, 4000);
+});
+
+test("watchdog skips fresh idle devices and unloaded/disconnected style states", () => {
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ lastRxAt: 1_000 }), 60_000), false);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ connected: false, lastRxAt: 1_000 }), 400_000), false);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ reconnecting: true, lastRxAt: 1_000 }), 400_000), false);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ watchdogHeartbeatInFlight: true, lastRxAt: 1_000 }), 400_000), false);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ client: undefined, lastRxAt: 1_000 }), 400_000), false);
+});
+
+test("watchdog requests heartbeat when last traffic is too old", () => {
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ lastRxAt: 1_000 }), 301_000), true);
+});
+
+test("watchdog heartbeat success does not imply reconnect condition", async () => {
+  let heartbeatCalls = 0;
+  const device = watchdogDevice({
+    lastRxAt: 1_000,
+    client: { sendSync: async () => { heartbeatCalls += 1; return { resource: "/ci/services", action: "RESPONSE" }; } },
+  });
+  assert.equal(shouldHeartbeatDevice(device, 301_000), true);
+  await device.client.sendSync({ resource: "/ci/services", action: "GET" });
+  recordHomeConnectFrame(device, "/ci/services", 301_000);
+  assert.equal(heartbeatCalls, 1);
+  assert.equal(shouldHeartbeatDevice(device, 301_001), false);
+});
+
+test("watchdog heartbeat failure can be guarded to exactly one reconnect", async () => {
+  let reconnects = 0;
+  const device = watchdogDevice({
+    lastRxAt: 1_000,
+    watchdogHeartbeatInFlight: false,
+    client: { sendSync: async () => { throw new Error("timeout"); } },
+  });
+  if (shouldHeartbeatDevice(device, 301_000)) {
+    device.watchdogHeartbeatInFlight = true;
+    try { await device.client.sendSync({ resource: "/ci/services", action: "GET" }); }
+    catch { reconnects += 1; device.reconnecting = true; }
+    finally { device.watchdogHeartbeatInFlight = false; }
+  }
+  assert.equal(reconnects, 1);
+  assert.equal(shouldHeartbeatDevice(device, 302_000), false);
+});
+
+test("watchdog interval guard prevents duplicate intervals", () => {
+  const state = { timer: undefined, starts: 0 };
+  function start() {
+    if (state.timer) return;
+    state.starts += 1;
+    state.timer = setInterval(() => {}, 60_000);
+  }
+  start();
+  start();
+  clearInterval(state.timer);
+  assert.equal(state.starts, 1);
+});
+
+test("unload-style connected flag prevents further watchdog actions", () => {
+  const device = watchdogDevice({ lastRxAt: 1_000 });
+  assert.equal(shouldHeartbeatDevice(device, 301_000), true);
+  device.connected = false;
+  assert.equal(shouldHeartbeatDevice(device, 302_000), false);
+});
+
+function allMandatoryPayload(dataSuffix, resource = "/ro/allMandatoryValues") {
+  return `{"sID":1,"msgID":7,"resource":"${resource}","version":1,"action":"RESPONSE","data":[${dataSuffix}}`;
+}
+
+test("truncated allMandatoryValues response is repaired and parsed", () => {
+  const payload = allMandatoryPayload('{"uid":100,"value":1},{"uid":8334,"value":0}');
+  const repaired = parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("Expected ',' or ']' after array element"));
+  assert.equal(repaired.resource, "/ro/allMandatoryValues");
+  assert.deepEqual(repaired.data.map(item => item.uid), [100, 8334]);
+});
+
+test("valid allMandatoryValues response remains valid without repair", () => {
+  const payload = '{"sID":1,"msgID":7,"resource":"/ro/allMandatoryValues","version":1,"action":"RESPONSE","data":[{"uid":100,"value":1}]}';
+  assert.deepEqual(parseMessage(payload).data, [{ uid: 100, value: 1 }]);
+  assert.equal(parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("unused")), undefined);
+});
+
+test("malformed response for other resources is not repaired", () => {
+  const payload = allMandatoryPayload('{"uid":100,"value":1}', "/ro/values");
+  assert.equal(parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("Expected ',' or ']' after array element")), undefined);
+});
+
+test("strongly broken allMandatoryValues response is not repaired", () => {
+  const payload = '{"sID":1,"msgID":7,"resource":"/ro/allMandatoryValues","version":1,"action":"RESPONSE","data":[{"uid":100,"value":';
+  assert.equal(parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("Unexpected end of JSON input")), undefined);
+});
+
+test("malformed allMandatoryValues retry classification remains available", () => {
+  const payload = allMandatoryPayload('{"uid":100,"value":1');
+  const repaired = parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("Expected ',' or ']' after array element"));
+  assert.equal(repaired, undefined);
+  assert.throws(() => parseMessage(payload), SyntaxError);
+});

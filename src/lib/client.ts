@@ -18,6 +18,7 @@ export interface HomeConnectClientOptions {
   appId: string;
   log?: Pick<ioBroker.Logger, "debug" | "info" | "warn" | "error">;
   messageHandler?: (message: HcMessage) => Promise<void> | void;
+  frameHandler?: (message: HcMessage) => void;
   closeHandler?: (error?: Error) => void;
 }
 
@@ -32,6 +33,7 @@ export class HomeConnectClient {
   private readonly appId: string;
   private readonly log?: HomeConnectClientOptions["log"];
   private readonly messageHandler?: HomeConnectClientOptions["messageHandler"];
+  private readonly frameHandler?: HomeConnectClientOptions["frameHandler"];
   private readonly closeHandler?: HomeConnectClientOptions["closeHandler"];
   private readonly pendingResponses = new PendingResponses();
 
@@ -46,6 +48,7 @@ export class HomeConnectClient {
     this.appId = options.appId;
     this.log = options.log;
     this.messageHandler = options.messageHandler;
+    this.frameHandler = options.frameHandler;
     this.closeHandler = options.closeHandler;
   }
 
@@ -204,16 +207,24 @@ export class HomeConnectClient {
     try {
       message = parseMessage(payload);
     } catch (error) {
-      const identity = extractPartialMessageIdentity(payload);
-      const parseError = new Error(`Malformed Home Connect JSON${identity.resource ? ` for ${identity.resource}` : ""}: ${String(error)}`);
+      const repaired = parseRepairedAllMandatoryValuesResponse(payload, error);
+      if (repaired) {
+        this.log?.warn(`${repaired.resource}: repaired truncated /ro/allMandatoryValues JSON response`);
+        message = repaired;
+      } else {
+        const identity = extractPartialMessageIdentity(payload);
+        const parseError = new Error(`Malformed Home Connect JSON${identity.resource ? ` for ${identity.resource}` : ""}: ${String(error)}`);
 
-      this.log?.warn(parseError.message);
-      if (identity.msgID !== undefined && this.pendingResponses.reject(identity.msgID, parseError)) {
+        this.log?.warn(parseError.message);
+        if (identity.msgID !== undefined && this.pendingResponses.reject(identity.msgID, parseError)) {
+          return;
+        }
+
         return;
       }
-
-      return;
     }
+
+    this.frameHandler?.(message);
 
     if (message.action === "RESPONSE" && this.pendingResponses.resolve(message)) {
       return;
@@ -262,4 +273,26 @@ function extractPartialMessageIdentity(payload: string): PartialMessageIdentity 
 
 function isMalformedJsonError(error: unknown): boolean {
   return error instanceof Error && error.message.startsWith("Malformed Home Connect JSON");
+}
+
+export function parseRepairedAllMandatoryValuesResponse(payload: string, error: unknown): HcMessage | undefined {
+  if (!isConservativelyRepairableAllMandatoryValues(payload, error)) return undefined;
+  const lastBrace = payload.lastIndexOf("}");
+  if (lastBrace < 0) return undefined;
+  try {
+    return parseMessage(`${payload.slice(0, lastBrace)}]${payload.slice(lastBrace)}`);
+  } catch {
+    return undefined;
+  }
+}
+
+function isConservativelyRepairableAllMandatoryValues(payload: string, error: unknown): boolean {
+  const trimmed = payload.trim();
+  const message = error instanceof Error ? error.message : String(error);
+  return trimmed.startsWith("{")
+    && trimmed.includes('"resource":"/ro/allMandatoryValues"')
+    && trimmed.includes('"action":"RESPONSE"')
+    && trimmed.includes('"data":[')
+    && /Expected.*(,|\]|array)|after array element|Unexpected end/i.test(message)
+    && /\}\}\s*$/.test(trimmed);
 }

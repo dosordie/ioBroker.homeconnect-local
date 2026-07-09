@@ -25,6 +25,15 @@ function profileWithProgramOptions(programOptionsByUid) {
   };
 }
 
+test("German ProcessPhase enum translations include laundry phases", () => {
+  assert.equal(
+    translateEnumValue("LaundryCare.Common.Option.ProcessPhase", "Fluffing", 18),
+    "Auflockern",
+  );
+  assert.equal(translateEnumValue("LaundryCare.Common.Option.ProcessPhase", "Washing", 5), "Waschen");
+  assert.equal(translateEnumValue("LaundryCare.Common.Option.ProcessPhase", "Drying", 21), "Trocknen");
+});
+
 test("German enum translations include EndTrigger and FlexStart", () => {
   assert.equal(
     translateEnumValue("BSH.Common.Status.ProgramRunDetail.EndTrigger", "ProgramAbortedByUser", 1),

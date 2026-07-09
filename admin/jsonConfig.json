@@ -9,7 +9,7 @@
         "_profileUploadHint": {
           "type": "infoBox",
           "title": "Profile ZIP files",
-          "text": "Recommended: upload Home Connect profile ZIP files in the ioBroker Files tab to 0_userdata.0/homeconnect-lokal-zip. The matching container path is /opt/iobroker/iobroker-data/files/0_userdata.0/homeconnect-lokal-zip and is used as the default profile directory. Restart this adapter instance after uploading new ZIP files so the profiles are scanned again.",
+          "text": "Place the HomeConnect Local HASS ZIP files in the ioBroker file area, for example /opt/iobroker/iobroker-data/files/0_userdata.0/. The adapter scans this folder for matching profile ZIP files. Restart the adapter instance or trigger a scan after uploading new ZIP files.",
           "boxType": "info",
           "sm": 12,
           "md": 12
@@ -17,7 +17,7 @@
         "profilePath": {
           "type": "text",
           "label": "Profile directory path",
-          "help": "Absolute container path to a directory containing Home Connect profile ZIP files. Default: /opt/iobroker/iobroker-data/files/0_userdata.0/homeconnect-lokal-zip. A single ZIP or extracted profile directory is still supported. Restart the adapter after changing profiles.",
+          "help": "Absolute container path to a directory containing Home Connect profile ZIP files. Default: /opt/iobroker/iobroker-data/files/0_userdata.0/. A single ZIP or extracted profile directory is still supported. Restart the adapter instance or trigger a scan after uploading new ZIP files.",
           "sm": 12,
           "md": 12
         },
@@ -31,7 +31,7 @@
         "enableMdnsDiscovery": {
           "type": "checkbox",
           "label": "Enable mDNS discovery",
-          "help": "Searches the local network for Home Connect appliances via _homeconnect._tcp.local. Discovery only writes discovery states and does not change device configuration yet.",
+          "help": "Searches the local network for Home Connect appliances via _homeconnect._tcp.local. Depending on the enabled options, discovery can write discovery states, update hosts, and enable or add uniquely discovered appliances.",
           "sm": 12,
           "md": 6
         },

@@ -1,9 +1,7 @@
 {
   "Main settings": "Haupteinstellungen",
   "Profile ZIP files": "Profil-ZIP-Dateien",
-  "Recommended now: copy Home Connect profile ZIP files into the configured container profile directory and set that path below. The ioBroker Files tab can upload files into adapter file storage; direct scanning from that storage is planned for a later version.": "Aktuell empfohlen: Home-Connect-Profil-ZIP-Dateien in den konfigurierten Container-Profilordner kopieren und diesen Pfad unten eintragen. Der ioBroker-Menüpunkt Dateien kann Dateien in die Adapter-Dateiablage hochladen; das direkte Scannen aus dieser Ablage ist für eine spätere Version geplant.",
   "Profile directory path": "Profilordner-Pfad",
-  "Absolute container path to a directory containing Home Connect profile ZIP files. A single ZIP or extracted profile directory is still supported.": "Absoluter Container-Pfad zu einem Ordner mit Home-Connect-Profil-ZIP-Dateien. Ein einzelnes ZIP oder ein entpackter Profilordner wird weiterhin unterstützt.",
   "Automatically add scanned profiles to the device table": "Gescannte Profile automatisch zur Gerätetabelle hinzufügen",
   "New profiles are added as disabled device suggestions. Existing enabled, host and haId values are preserved.": "Neue Profile werden als deaktivierte Gerätevorschläge hinzugefügt. Vorhandene Aktiv-, Host- und haId-Werte bleiben erhalten.",
   "App name": "App-Name",
@@ -25,11 +23,13 @@
   "Creates debug states raw.uid_<uid> with raw Home Connect values.": "Erzeugt Debug-States raw.uid_<uid> mit rohen Home-Connect-Werten.",
   "Log received raw /ro values": "Empfangene rohe /ro-Werte loggen",
   "Enable mDNS discovery": "mDNS-Erkennung aktivieren",
-  "Searches the local network for Home Connect appliances via _homeconnect._tcp.local. Discovery only writes discovery states and does not change device configuration yet.": "Sucht im lokalen Netzwerk per _homeconnect._tcp.local nach Home-Connect-Geräten. Die Erkennung schreibt nur Discovery-States und ändert die Gerätekonfiguration noch nicht.",
   "mDNS discovery timeout in seconds": "mDNS-Erkennungs-Timeout in Sekunden",
   "How long each Home Connect mDNS discovery scan listens for responses.": "Wie lange ein Home-Connect-mDNS-Erkennungslauf auf Antworten wartet.",
   "Update hosts from discovered appliances": "Hosts aus erkannten Geräten aktualisieren",
   "Automatically updates the host/IP address of existing configured appliances from safe mDNS matches.": "Aktualisiert die Host/IP-Adresse vorhandener konfigurierter Geräte automatisch aus sicheren mDNS-Treffern.",
   "Automatically enable/add discovered appliances": "Erkannte Geräte automatisch aktivieren/hinzufügen",
-  "Automatically enables or adds uniquely discovered appliances to the device table when a matching profile ZIP is available.": "Aktiviert oder ergänzt eindeutig erkannte Geräte automatisch in der Gerätetabelle, wenn ein passendes Profil-ZIP vorhanden ist."
+  "Automatically enables or adds uniquely discovered appliances to the device table when a matching profile ZIP is available.": "Aktiviert oder ergänzt eindeutig erkannte Geräte automatisch in der Gerätetabelle, wenn ein passendes Profil-ZIP vorhanden ist.",
+  "Place the HomeConnect Local HASS ZIP files in the ioBroker file area, for example /opt/iobroker/iobroker-data/files/0_userdata.0/. The adapter scans this folder for matching profile ZIP files. Restart the adapter instance or trigger a scan after uploading new ZIP files.": "Lege die HomeConnect-Local-HASS-ZIP-Dateien in den ioBroker-Dateibereich, z. B. nach /opt/iobroker/iobroker-data/files/0_userdata.0/. Der Adapter durchsucht diesen Ordner nach passenden Profil-ZIP-Dateien. Nach dem Hochladen neuer ZIP-Dateien die Adapterinstanz neu starten oder einen Scan auslösen.",
+  "Searches the local network for Home Connect appliances via _homeconnect._tcp.local. Depending on the enabled options, discovery can write discovery states, update hosts, and enable or add uniquely discovered appliances.": "Sucht im lokalen Netzwerk per _homeconnect._tcp.local nach Home-Connect-Geräten. Je nach aktivierten Optionen kann die Erkennung Discovery-States schreiben, Hosts aktualisieren und eindeutig erkannte Geräte aktivieren oder ergänzen.",
+  "Absolute container path to a directory containing Home Connect profile ZIP files. Default: /opt/iobroker/iobroker-data/files/0_userdata.0/. A single ZIP or extracted profile directory is still supported. Restart the adapter instance or trigger a scan after uploading new ZIP files.": "Absoluter Container-Pfad zu einem Ordner mit Home-Connect-Profil-ZIP-Dateien. Standard: /opt/iobroker/iobroker-data/files/0_userdata.0/. Ein einzelnes ZIP oder ein entpackter Profilordner wird weiterhin unterstützt. Nach dem Hochladen neuer ZIP-Dateien die Adapterinstanz neu starten oder einen Scan auslösen."
 }

@@ -94,6 +94,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         stateValuesByFeature: new Map<string, ioBroker.StateValue>(),
         rawValuesByFeature: new Map<string, unknown>(),
         programExecutionByFeature: new Map<string, string>(),
+        lastSelectedProgramRaw: undefined,
+        lastOptionContextProgramRaw: undefined,
       };
 
       this.devices.set(profile.haId, device);
@@ -359,10 +361,13 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
       if (writableState.kind === "startProgramWithOptions") {
         await this.writeStartProgram(device, rawValue, await this.startOptionValuesFromState(device, rawValue));
-      } else if (writableState.kind === "startProgram" || writableState.kind === "startProgramName" || writableState.featureName === ACTIVE_PROGRAM_FEATURE) {
-        if (writableState.kind === "startProgram") this.warnIfSelectedProgramNotSelectAndStart(device, rawValue);
-        else this.warnIfDirectProgramNotSelectAndStart(device, rawValue);
+      } else if (writableState.kind === "startProgram") {
+        this.warnIfSelectedProgramNotSelectAndStart(device, rawValue);
         await this.writeStartProgram(device, rawValue, this.buildAutomaticStartOptionValues(device, rawValue));
+      } else if (writableState.kind === "startProgramName" || writableState.featureName === ACTIVE_PROGRAM_FEATURE) {
+        this.warnIfDirectProgramNotSelectAndStart(device, rawValue);
+        await this.selectProgramBeforeDirectStartIfNeeded(device, rawValue);
+        await this.writeStartProgram(device, rawValue, await this.startOptionValuesFromState(device, rawValue));
       } else if (writableState.featureName === SELECTED_PROGRAM_FEATURE) {
         await this.writeSelectedProgram(device, rawValue, []);
       } else {
@@ -424,6 +429,29 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     return this.mergeStartOptionValues(explicitOptions, this.buildAutomaticStartOptionValues(device, programRaw));
   }
 
+  private async selectProgramBeforeDirectStartIfNeeded(device: RunningDevice, programRaw: unknown): Promise<void> {
+    const programUid = Number(programRaw);
+    if (!Number.isFinite(programUid)) return;
+    if (Number(device.lastSelectedProgramRaw) === programUid && device.lastOptionContextProgramRaw === programUid) return;
+
+    if (Number(device.lastSelectedProgramRaw) !== programUid) {
+      this.log.info(`${device.profile.haId}: selecting program before start = ${programUid}`);
+      await this.writeSelectedProgram(device, programUid, []);
+    }
+
+    this.log.info(`${device.profile.haId}: waiting for selected program option refresh`);
+    const deadline = Date.now() + 1000;
+    while (Date.now() < deadline) {
+      if (Number(device.lastSelectedProgramRaw) === programUid && device.lastOptionContextProgramRaw === programUid) return;
+      await this.sleep(100);
+    }
+    this.log.warn(`${device.profile.haId}: selected program option refresh timed out for ${programUid}; automatic start options will be omitted unless explicit options are configured`);
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   private async writeStartProgram(device: RunningDevice, selectedProgramRaw: unknown, options: Array<{ uid: number; value: unknown }>): Promise<void> {
     if (!device.client) throw new Error("Device is not connected");
     const programUid = Number(selectedProgramRaw);
@@ -470,6 +498,11 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const programUidKey = Number.isFinite(programUid) ? normalizeUid(programUid) : undefined;
     const programOptions = programUidKey ? device.profile.featureMapping.programOptionsByUid[programUidKey] : undefined;
     const result: Array<{ uid: number; value: unknown }> = [];
+
+    if (Number.isFinite(programUid) && device.lastOptionContextProgramRaw !== programUid) {
+      this.log.debug(`${device.profile.haId}: start options for ${programUid}${programKey ? ` (${programKey})` : ""}: none; automatic options source: unsafe context (selected=${JSON.stringify(device.lastSelectedProgramRaw)}, optionContext=${JSON.stringify(device.lastOptionContextProgramRaw)})`);
+      return result;
+    }
 
     if (programOptions) {
       for (const programOption of programOptions) {
@@ -623,6 +656,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.writeEnumCompanionStates(device, target);
     device.stateValuesByFeature.set(target.name, normalizedValue);
     device.rawValuesByFeature.set(target.name, target.rawValue);
+    this.updateProgramOptionContextMarker(device, target);
     await this.writeRootProgramAliasValues(device, target, normalizedValue);
     await this.writeStateMetadata(device, target, undefined, true, isWritable, value);
     if (isWritable) {
@@ -634,6 +668,26 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.setState(`${device.baseId}.raw.uid_${target.uid}`, JSON.stringify(value), true);
     }
     if (target.name.includes(".Program.") || target.name.includes(".Setting.Favorite.")) await this.updateProgramList(device);
+  }
+
+  private updateProgramOptionContextMarker(device: RunningDevice, target: StateTarget): void {
+    if (target.name === SELECTED_PROGRAM_FEATURE) {
+      const selectedRaw = target.rawValue;
+      if (device.lastSelectedProgramRaw !== selectedRaw) {
+        device.lastOptionContextProgramRaw = undefined;
+      }
+      device.lastSelectedProgramRaw = selectedRaw;
+      return;
+    }
+
+    const selectedUid = Number(device.lastSelectedProgramRaw);
+    if (!Number.isFinite(selectedUid)) return;
+    const selectedUidKey = normalizeUid(selectedUid);
+    const programOptions = selectedUidKey ? device.profile.featureMapping.programOptionsByUid[selectedUidKey] : undefined;
+    const isCurrentProgramOption = programOptions?.some(option => normalizeUid(option.refUID) === normalizeUid(target.uid)) === true;
+    if (isCurrentProgramOption || target.name.includes(".Option.")) {
+      device.lastOptionContextProgramRaw = selectedUid;
+    }
   }
 
   private async writeRootProgramAliasValues(device: RunningDevice, target: StateTarget, value: ioBroker.StateValue): Promise<void> {

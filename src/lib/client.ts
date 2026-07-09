@@ -127,10 +127,10 @@ export class HomeConnectClient {
     return this.sendSync({
       resource: "/ro/selectedProgram",
       action: "POST",
-      data: {
+      data: [{
         program: programUid,
         options,
-      },
+      }],
     }, 20000);
   }
 
@@ -138,10 +138,10 @@ export class HomeConnectClient {
     return this.sendSync({
       resource: "/ro/activeProgram",
       action: "POST",
-      data: {
+      data: [{
         program: programUid,
         options,
-      },
+      }],
     }, 20000);
   }
 

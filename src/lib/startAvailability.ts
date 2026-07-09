@@ -1,4 +1,4 @@
-import { ACTIVE_PROGRAM_FEATURE, SELECTED_PROGRAM_FEATURE } from "./constants";
+import { ACTIVE_PROGRAM_FEATURE, POWER_STATE_OFF, POWER_STATE_ON, SELECTED_PROGRAM_FEATURE } from "./constants";
 import { normalizeUid } from "./ids";
 import { RunningDevice } from "./runtimeTypes";
 
@@ -67,7 +67,18 @@ function availability(reason: StartBlockedReason): StartAvailability {
 }
 
 function featureValue(device: RunningDevice, featureName: string): unknown {
-  return device.rawValuesByFeature.has(featureName) ? device.rawValuesByFeature.get(featureName) : device.stateValuesByFeature.get(featureName);
+  if (device.stateValuesByFeature.has(featureName)) return device.stateValuesByFeature.get(featureName);
+  if (!device.rawValuesByFeature.has(featureName)) return undefined;
+  const rawValue = device.rawValuesByFeature.get(featureName);
+  return enumTextForRawValue(device, featureName, rawValue) ?? rawValue;
+}
+
+function enumTextForRawValue(device: RunningDevice, featureName: string, rawValue: unknown): string | undefined {
+  const uid = Object.entries(device.profile.featureMapping.featuresByUid).find(([, feature]) => feature === featureName)?.[0];
+  const normalizedUid = normalizeUid(uid);
+  const enumType = normalizedUid ? device.profile.featureMapping.enumTypeByUid[normalizedUid] : undefined;
+  if (!enumType) return undefined;
+  return device.profile.featureMapping.enumValuesByType[enumType]?.[String(rawValue)];
 }
 
 function hasSelectedProgram(device: RunningDevice): boolean {
@@ -90,6 +101,8 @@ function normalizeOperationState(value: unknown): "running" | undefined {
 }
 
 function normalizePowerState(value: unknown): "on" | "off" | undefined {
+  if (value === POWER_STATE_ON) return "on";
+  if (value === POWER_STATE_OFF) return "off";
   const normalized = normalizeEnumLike(value);
   if (normalized === "on") return "on";
   if (normalized === "mainsoff" || normalized === "off" || normalized === "standby") return "off";

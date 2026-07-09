@@ -307,7 +307,7 @@ test("discovery auto-add keeps existing enabled devices enabled and does not dup
 
 const { evaluateStartAvailability } = require("../build/lib/startAvailability");
 
-function startAvailabilityDevice(type, values = {}, rawValues = {}, featuresByUid = {}) {
+function startAvailabilityDevice(type, values = {}, rawValues = {}, featuresByUid = {}, enumTypeByUid = {}, enumValuesByType = {}) {
   const device = {
     baseId: "device",
     config: { type },
@@ -318,8 +318,8 @@ function startAvailabilityDevice(type, values = {}, rawValues = {}, featuresByUi
       key: "key",
       featureMapping: {
         featuresByUid: { "0100": "BSH.Common.Root.ActiveProgram", ...featuresByUid },
-        enumTypeByUid: {},
-        enumValuesByType: {},
+        enumTypeByUid,
+        enumValuesByType,
         programOptionsByUid: {},
       },
     },
@@ -387,4 +387,34 @@ test("start availability checks power-on for washer and dryer but not dishwasher
 test("start availability reports ready when all known start conditions pass", () => {
   const availability = evaluateStartAvailability(startAvailabilityDevice("Washer", readyValues()), true);
   assert.deepEqual(availability, { canStart: true, reason: "ready", reasonDe: "startbereit" });
+});
+
+test("start availability resolves raw numeric DoorState enum values", () => {
+  const featuresByUid = { "0200": "BSH.Common.Status.DoorState" };
+  const enumProfile = { "0200": "BSH.Common.EnumType.DoorState" };
+  const enumValues = { "BSH.Common.EnumType.DoorState": { "1": "Open", "2": "Locked" } };
+  const openDevice = startAvailabilityDevice("Washer", readyValues({ "BSH.Common.Status.DoorState": undefined }), { "BSH.Common.Status.DoorState": 1 }, featuresByUid, enumProfile, enumValues);
+  const lockedDevice = startAvailabilityDevice("Washer", readyValues({ "BSH.Common.Status.DoorState": undefined }), { "BSH.Common.Status.DoorState": 2 }, featuresByUid, enumProfile, enumValues);
+  openDevice.stateValuesByFeature.delete("BSH.Common.Status.DoorState");
+  lockedDevice.stateValuesByFeature.delete("BSH.Common.Status.DoorState");
+  assert.equal(evaluateStartAvailability(openDevice, true).reason, "door_open");
+  assert.notEqual(evaluateStartAvailability(lockedDevice, true).reason, "door_open");
+});
+
+test("start availability resolves raw numeric OperationState enum values", () => {
+  const featuresByUid = { "0300": "BSH.Common.Status.OperationState" };
+  const enumProfile = { "0300": "BSH.Common.EnumType.OperationState" };
+  const enumValues = { "BSH.Common.EnumType.OperationState": { "5": "Run" } };
+  const device = startAvailabilityDevice("Dryer", readyValues({ "BSH.Common.Status.OperationState": undefined }), { "BSH.Common.Status.OperationState": 5 }, featuresByUid, enumProfile, enumValues);
+  device.stateValuesByFeature.delete("BSH.Common.Status.OperationState");
+  assert.equal(evaluateStartAvailability(device, true).reason, "already_running");
+});
+
+test("start availability handles raw numeric PowerState constants", () => {
+  const offDevice = startAvailabilityDevice("Washer", readyValues({ "BSH.Common.Setting.PowerState": undefined }), { "BSH.Common.Setting.PowerState": 1 });
+  const onDevice = startAvailabilityDevice("Washer", readyValues({ "BSH.Common.Setting.PowerState": undefined }), { "BSH.Common.Setting.PowerState": 2 });
+  offDevice.stateValuesByFeature.delete("BSH.Common.Setting.PowerState");
+  onDevice.stateValuesByFeature.delete("BSH.Common.Setting.PowerState");
+  assert.equal(evaluateStartAvailability(offDevice, true).reason, "power_off");
+  assert.notEqual(evaluateStartAvailability(onDevice, true).reason, "power_off");
 });

@@ -607,6 +607,34 @@ test("real phase values map normally and running states are not final states", (
   assert.equal(isFinishedOperationState("Running"), false);
 });
 
+
+test("Laundry ProcessPhase raw 255 clears display value but keeps raw value", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  for (const feature of ["LaundryCare.Common.Option.ProcessPhase", "LaundryCare.Dryer.Option.ProcessPhase"]) {
+    const profile = telemetryProfile();
+    profile.featureMapping.featuresByUid["0221"] = feature;
+    const mapper = new StateMapper(profile);
+    assert.deepEqual(mapper.toStateTarget({ uid: "0221", value: 255 }), {
+      id: "phases.ProcessPhase",
+      name: feature,
+      value: "",
+      rawValue: 255,
+      category: "phases",
+      uid: "0221",
+    });
+  }
+});
+
+test("Laundry ProcessPhase raw 255 does not clear raw companion input", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  const mapper = new StateMapper(telemetryProfile());
+  const target = mapper.toStateTarget({ uid: "0221", value: 255 });
+  assert.equal(target.value, "");
+  assert.equal(target.rawValue, 255);
+  assert.equal(target.id, "phases.ProcessPhase");
+  assert.equal(translateEnumValue(target.name, String(target.value), target.rawValue), "");
+});
+
 test("finalized telemetry values respect object types", () => {
   assert.equal(coerceStateValueForObjectType(0, "number"), 0);
   assert.equal(coerceStateValueForObjectType(0, "string"), "0");
@@ -763,4 +791,56 @@ test("malformed allMandatoryValues retry classification remains available", () =
   const repaired = parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("Expected ',' or ']' after array element"));
   assert.equal(repaired, undefined);
   assert.throws(() => parseMessage(payload), SyntaxError);
+});
+
+function effectivePowerDevice(overrides = {}) {
+  return {
+    connected: true,
+    stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "On"]]),
+    rawValuesByFeature: new Map([["BSH.Common.Setting.PowerState", 2]]),
+    profile: {
+      featureMapping: {
+        featuresByUid: { "0103": "BSH.Common.Setting.PowerState" },
+        enumTypeByUid: { "0103": "PowerState" },
+        enumValuesByType: { PowerState: { 1: "Off", 2: "On", 3: "MainsOff", 4: "Standby" } },
+        programOptionsByUid: {},
+      },
+    },
+    ...overrides,
+  };
+}
+
+test("effective power state reports disconnected devices as offline without changing stored values", () => {
+  const { evaluateEffectivePowerState } = require("../build/lib/effectivePowerState");
+  const device = effectivePowerDevice({ connected: false });
+  const stateValuesBefore = new Map(device.stateValuesByFeature);
+  const rawValuesBefore = new Map(device.rawValuesByFeature);
+  assert.deepEqual(evaluateEffectivePowerState(device), {
+    effectivePowerState: "Offline",
+    effectivePowerStateDe: "Aus / offline",
+    isEffectivelyOn: false,
+  });
+  assert.deepEqual(device.stateValuesByFeature, stateValuesBefore);
+  assert.deepEqual(device.rawValuesByFeature, rawValuesBefore);
+});
+
+test("effective power state maps connected known power states", () => {
+  const { evaluateEffectivePowerState } = require("../build/lib/effectivePowerState");
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "On"]]) })).isEffectivelyOn, true);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "MainsOff"]]) })).isEffectivelyOn, false);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "Off"]]) })).isEffectivelyOn, false);
+  assert.deepEqual(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "Standby"]]) })), {
+    effectivePowerState: "Standby",
+    effectivePowerStateDe: "Standby",
+    isEffectivelyOn: true,
+  });
+});
+
+test("effective power state resolves numeric raw PowerState through enum mapping", () => {
+  const { evaluateEffectivePowerState } = require("../build/lib/effectivePowerState");
+  assert.deepEqual(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map(), rawValuesByFeature: new Map([["BSH.Common.Setting.PowerState", 3]]) })), {
+    effectivePowerState: "MainsOff",
+    effectivePowerStateDe: "Aus",
+    isEffectivelyOn: false,
+  });
 });

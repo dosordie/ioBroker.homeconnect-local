@@ -16,6 +16,8 @@ export interface RunningDevice {
   stateValuesByFeature: Map<string, ioBroker.StateValue>;
   rawValuesByFeature: Map<string, unknown>;
   programExecutionByFeature: Map<string, string>;
+  lastSelectedProgramRaw?: unknown;
+  lastOptionContextProgramRaw?: unknown;
 }
 
 export type WritableStateKind = "value" | "command" | "startProgram" | "startProgramWithOptions" | "startProgramName";

@@ -336,3 +336,115 @@ test("explicit start options win over automatic options for the same UID", () =>
     [{ uid: 5127, value: false }, { uid: 5128, value: true }],
   );
 });
+
+const { evaluateStartAvailability } = require("../build/lib/startAvailability");
+
+function startAvailabilityDevice(overrides = {}) {
+  const featuresByUid = {
+    "0101": "BSH.Common.Status.DoorState",
+    "0102": "BSH.Common.Status.OperationState",
+    "0103": "BSH.Common.Setting.PowerState",
+    "0104": "BSH.Common.Status.RemoteControlStartAllowed",
+    "0105": "BSH.Common.Root.SelectedProgram",
+    "0106": "BSH.Common.Root.ActiveProgram",
+  };
+  return {
+    baseId: "device",
+    config: { type: overrides.type ?? "Washer" },
+    profile: {
+      haId: "device",
+      type: overrides.type ?? "Washer",
+      featureMapping: {
+        featuresByUid,
+        enumTypeByUid: {
+          "0101": "DoorState",
+          "0102": "OperationState",
+          "0103": "PowerState",
+        },
+        enumValuesByType: {
+          DoorState: { 1: "Open", 2: "Locked", 3: "Closed", 4: "Ajar" },
+          OperationState: { 1: "Run", 2: "Ready", 3: "Running" },
+          PowerState: { 1: "Off", 2: "On", 3: "MainsOff" },
+        },
+        programOptionsByUid: {},
+      },
+    },
+    mapper: {},
+    connected: true,
+    reconnecting: false,
+    reconnectFailures: 0,
+    writableUids: new Set(["0106"]),
+    readOnlyUids: new Set(),
+    blockedCommands: [],
+    stateValuesByFeature: new Map([
+      ["BSH.Common.Status.DoorState", "Closed"],
+      ["BSH.Common.Status.OperationState", "Ready"],
+      ["BSH.Common.Setting.PowerState", "On"],
+      ["BSH.Common.Status.RemoteControlStartAllowed", true],
+      ["BSH.Common.Root.SelectedProgram", 100],
+    ]),
+    rawValuesByFeature: new Map(),
+    eventValuesByFeature: new Map(),
+    programExecutionByFeature: new Map(),
+    ...overrides,
+  };
+}
+
+function availabilityReason(overrides, connected = true) {
+  return evaluateStartAvailability(startAvailabilityDevice(overrides), connected).reason;
+}
+
+test("start availability reports disconnected devices", () => {
+  assert.equal(availabilityReason({}, false), "not_connected");
+});
+
+test("start availability handles door states", () => {
+  assert.equal(availabilityReason({ stateValuesByFeature: new Map(startAvailabilityDevice().stateValuesByFeature).set("BSH.Common.Status.DoorState", "Open") }), "door_open");
+  assert.equal(availabilityReason({ stateValuesByFeature: new Map(startAvailabilityDevice().stateValuesByFeature).set("BSH.Common.Status.DoorState", "Ajar") }), "door_open");
+  assert.notEqual(availabilityReason({ stateValuesByFeature: new Map(startAvailabilityDevice().stateValuesByFeature).set("BSH.Common.Status.DoorState", "Closed") }), "door_open");
+  assert.notEqual(availabilityReason({ stateValuesByFeature: new Map(startAvailabilityDevice().stateValuesByFeature).set("BSH.Common.Status.DoorState", "Locked") }), "door_open");
+});
+
+test("start availability handles running operation states", () => {
+  assert.equal(availabilityReason({ stateValuesByFeature: new Map(startAvailabilityDevice().stateValuesByFeature).set("BSH.Common.Status.OperationState", "Run") }), "already_running");
+  assert.equal(availabilityReason({ stateValuesByFeature: new Map(startAvailabilityDevice().stateValuesByFeature).set("BSH.Common.Status.OperationState", "Running") }), "already_running");
+});
+
+test("start availability requires a selected program", () => {
+  const stateValuesByFeature = new Map(startAvailabilityDevice().stateValuesByFeature);
+  stateValuesByFeature.delete("BSH.Common.Root.SelectedProgram");
+  assert.equal(availabilityReason({ stateValuesByFeature }), "no_selected_program");
+  stateValuesByFeature.set("BSH.Common.Root.SelectedProgram", "");
+  assert.equal(availabilityReason({ stateValuesByFeature }), "no_selected_program");
+});
+
+test("start availability handles remote start allowance", () => {
+  for (const type of ["Dishwasher", "Washer", "Dryer"]) {
+    assert.equal(availabilityReason({ type, stateValuesByFeature: new Map(startAvailabilityDevice({ type }).stateValuesByFeature).set("BSH.Common.Status.RemoteControlStartAllowed", false) }), "remote_start_not_allowed");
+  }
+});
+
+test("start availability handles appliance-specific power rules", () => {
+  assert.equal(availabilityReason({ type: "Washer", stateValuesByFeature: new Map(startAvailabilityDevice({ type: "Washer" }).stateValuesByFeature).set("BSH.Common.Setting.PowerState", "MainsOff") }), "power_off");
+  assert.equal(availabilityReason({ type: "Dryer", stateValuesByFeature: new Map(startAvailabilityDevice({ type: "Dryer" }).stateValuesByFeature).set("BSH.Common.Setting.PowerState", "Off") }), "power_off");
+  const dishwasher = evaluateStartAvailability(startAvailabilityDevice({ type: "Dishwasher", stateValuesByFeature: new Map(startAvailabilityDevice({ type: "Dishwasher" }).stateValuesByFeature).set("BSH.Common.Setting.PowerState", "Off") }), true);
+  assert.equal(dishwasher.reason, "ready");
+  assert.equal(dishwasher.canStart, true);
+});
+
+test("start availability reports ready state", () => {
+  for (const type of ["Dishwasher", "Washer", "Dryer"]) {
+    const availability = evaluateStartAvailability(startAvailabilityDevice({ type }), true);
+    assert.equal(availability.canStart, true);
+    assert.equal(availability.reason, "ready");
+  }
+});
+
+test("start availability resolves raw numeric values through enum mapping", () => {
+  const base = startAvailabilityDevice({ stateValuesByFeature: new Map() });
+  assert.equal(evaluateStartAvailability({ ...base, rawValuesByFeature: new Map([["BSH.Common.Status.DoorState", 1], ["BSH.Common.Status.OperationState", 2], ["BSH.Common.Setting.PowerState", 2], ["BSH.Common.Status.RemoteControlStartAllowed", true], ["BSH.Common.Root.SelectedProgram", 100]]) }, true).reason, "door_open");
+  assert.notEqual(evaluateStartAvailability({ ...base, rawValuesByFeature: new Map([["BSH.Common.Status.DoorState", 2], ["BSH.Common.Status.OperationState", 2], ["BSH.Common.Setting.PowerState", 2], ["BSH.Common.Status.RemoteControlStartAllowed", true], ["BSH.Common.Root.SelectedProgram", 100]]) }, true).reason, "door_open");
+  assert.equal(evaluateStartAvailability({ ...base, rawValuesByFeature: new Map([["BSH.Common.Status.DoorState", 3], ["BSH.Common.Status.OperationState", 1], ["BSH.Common.Setting.PowerState", 2], ["BSH.Common.Status.RemoteControlStartAllowed", true], ["BSH.Common.Root.SelectedProgram", 100]]) }, true).reason, "already_running");
+  assert.equal(evaluateStartAvailability({ ...base, rawValuesByFeature: new Map([["BSH.Common.Status.DoorState", 3], ["BSH.Common.Status.OperationState", 2], ["BSH.Common.Setting.PowerState", 1], ["BSH.Common.Status.RemoteControlStartAllowed", true], ["BSH.Common.Root.SelectedProgram", 100]]) }, true).reason, "power_off");
+  assert.notEqual(evaluateStartAvailability({ ...base, rawValuesByFeature: new Map([["BSH.Common.Status.DoorState", 3], ["BSH.Common.Status.OperationState", 2], ["BSH.Common.Setting.PowerState", 2], ["BSH.Common.Status.RemoteControlStartAllowed", true], ["BSH.Common.Root.SelectedProgram", 100]]) }, true).reason, "power_off");
+});

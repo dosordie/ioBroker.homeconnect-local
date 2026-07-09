@@ -11,7 +11,9 @@ export interface RunningDevice {
   reconnectTimer?: NodeJS.Timeout;
   reconnecting: boolean;
   reconnectFailures: number;
+  connected: boolean;
   writableUids: Set<string>;
+  readOnlyUids: Set<string>;
   blockedCommands: string[];
   stateValuesByFeature: Map<string, ioBroker.StateValue>;
   rawValuesByFeature: Map<string, unknown>;

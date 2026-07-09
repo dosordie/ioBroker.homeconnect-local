@@ -24,7 +24,7 @@ export async function ensureButtonStateObject(adapter: ioBroker.Adapter, id: str
     name,
     type: "boolean",
     role: "button",
-    read: false,
+    read: true,
     write: true,
     def: false,
     states: undefined,

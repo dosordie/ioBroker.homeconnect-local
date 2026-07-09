@@ -20,7 +20,7 @@ import {
 import { normalizeUid, sanitizeObjectId } from "./lib/ids";
 import { loadProfiles } from "./lib/profile";
 import { DiscoveredHomeConnectDevice, DiscoveryProfileMatch, matchDiscoveredDeviceToProfile, startHomeConnectDiscovery, stopHomeConnectDiscovery } from "./lib/mdnsDiscovery";
-import { DiscoveryHostUpdate, updateConfiguredDeviceHostsFromDiscovery } from "./lib/discoveryConfigUpdate";
+import { DiscoveryDeviceAdded, DiscoveryDeviceEnabled, DiscoveryHostUpdate, addOrEnableConfiguredDevicesFromDiscovery, updateConfiguredDeviceHostsFromDiscovery } from "./lib/discoveryConfigUpdate";
 import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/reconnectPolicy";
 import { RunningDevice, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
@@ -93,13 +93,19 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     if (this.currentConfig.enableMdnsDiscovery === true) {
       const discoveryResult = await this.runMdnsDiscoveryScan(profiles);
+      if (this.currentConfig.autoAddDiscoveredDevices === true) {
+        await this.addOrEnableConfiguredDevicesFromDiscovery(discoveryResult.matched);
+      }
       if (this.currentConfig.autoUpdateDiscoveredHosts === true) {
         await this.updateConfiguredHostsFromDiscovery(discoveryResult.matched);
       }
     }
 
     for (const configuredDevice of this.currentConfig.devices ?? []) {
-      if (!configuredDevice.enabled) continue;
+      if (!configuredDevice.enabled) {
+        this.log.info(`${configuredDevice.haId || configuredDevice.name || "configured device"}: configured device is disabled, skipping connection`);
+        continue;
+      }
       if (!configuredDevice.haId || !configuredDevice.host) {
         this.log.warn(`Skipping incomplete device config: ${JSON.stringify(configuredDevice)}`);
         continue;
@@ -146,6 +152,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject("discovery.unmatchedCount", "Unmatched discovered appliance count", 0, "value");
     await this.ensureStateObject("discovery.updatedHostsCount", "Updated configured host count from discovery", 0, "value");
     await this.ensureStateObject("discovery.updatedHostsJson", "Updated configured hosts JSON", "[]", "json");
+    await this.ensureStateObject("discovery.addedDevicesCount", "Added discovered appliance count", 0, "value");
+    await this.ensureStateObject("discovery.addedDevicesJson", "Added discovered appliances JSON", "[]", "json");
+    await this.ensureStateObject("discovery.enabledDevicesCount", "Enabled discovered appliance count", 0, "value");
+    await this.ensureStateObject("discovery.enabledDevicesJson", "Enabled discovered appliances JSON", "[]", "json");
     await this.ensureCommandStateObject("discovery.scanNow", "Scan for Home Connect appliances now");
   }
 
@@ -160,6 +170,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const timeoutMs = Math.max(1, Number(this.currentConfig.mdnsDiscoveryTimeout ?? 10)) * 1000;
     await new Promise(resolve => setTimeout(resolve, timeoutMs + 100));
     result = await this.writeDiscoveryStates(profiles);
+    this.log.info(`mDNS discovery finished: ${result.found.length} found, ${result.matched.length} matched, ${result.unmatched.length} unmatched`);
     return result;
   }
 
@@ -207,6 +218,26 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.applyDiscoveredHostsToRunningDevices(result.updates);
     }
     return result.updates;
+  }
+
+  private async addOrEnableConfiguredDevicesFromDiscovery(matches: DiscoveryProfileMatch[], connectNewDevices = false): Promise<{ added: DiscoveryDeviceAdded[]; enabled: DiscoveryDeviceEnabled[] }> {
+    const result = addOrEnableConfiguredDevicesFromDiscovery(this.currentConfig.devices ?? [], matches);
+    await this.writeAutoAddedDeviceStates(result.added, result.enabled);
+    if (!result.changed) return { added: [], enabled: [] };
+
+    this.currentConfig = { ...this.currentConfig, devices: result.devices };
+    await this.persistNativeConfig();
+    this.log.info(`Added/enabled ${result.added.length + result.enabled.length} Home Connect device(s) from mDNS discovery. Refresh admin page to see changes.`);
+
+    if (connectNewDevices) await this.prepareAndConnectConfiguredDevices([...result.added, ...result.enabled].map(device => device.haId));
+    return { added: result.added, enabled: result.enabled };
+  }
+
+  private async writeAutoAddedDeviceStates(added: DiscoveryDeviceAdded[], enabled: DiscoveryDeviceEnabled[]): Promise<void> {
+    await this.setState("discovery.addedDevicesCount", added.length, true);
+    await this.setState("discovery.addedDevicesJson", JSON.stringify(added), true);
+    await this.setState("discovery.enabledDevicesCount", enabled.length, true);
+    await this.setState("discovery.enabledDevicesJson", JSON.stringify(enabled), true);
   }
 
   private async writeUpdatedHostStates(updates: DiscoveryHostUpdate[]): Promise<void> {
@@ -296,6 +327,49 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private deviceDisplayName(profile: ApplianceProfile, config: ConfiguredDevice): string {
     return config.name || this.profileDisplayName(profile);
+  }
+
+
+  private async prepareAndConnectConfiguredDevices(haIds: string[]): Promise<void> {
+    const requestedHaIds = new Set(haIds);
+    if (requestedHaIds.size === 0) return;
+    const profilesByHaId = new Map(this.discoveryProfiles.map(profile => [profile.haId, profile]));
+
+    for (const configuredDevice of this.currentConfig.devices ?? []) {
+      if (!configuredDevice.haId || !requestedHaIds.has(configuredDevice.haId) || !configuredDevice.enabled) continue;
+      if (this.devices.has(configuredDevice.haId)) continue;
+      if (!configuredDevice.host) {
+        this.log.warn(`Skipping incomplete device config: ${JSON.stringify(configuredDevice)}`);
+        continue;
+      }
+
+      const profile = profilesByHaId.get(configuredDevice.haId);
+      if (!profile) {
+        this.log.warn(`No profile found for haId ${configuredDevice.haId}`);
+        continue;
+      }
+
+      const device: RunningDevice = {
+        baseId: sanitizeObjectId(profile.haId),
+        config: configuredDevice,
+        profile,
+        mapper: new StateMapper(profile),
+        reconnecting: false,
+        reconnectFailures: 0,
+        writableUids: new Set<string>(),
+        blockedCommands: [],
+        stateValuesByFeature: new Map<string, ioBroker.StateValue>(),
+        rawValuesByFeature: new Map<string, unknown>(),
+        eventValuesByFeature: new Map<string, ioBroker.StateValue>(),
+        programExecutionByFeature: new Map<string, string>(),
+        lastSelectedProgramRaw: undefined,
+        lastOptionContextProgramRaw: undefined,
+      };
+
+      this.devices.set(profile.haId, device);
+      await this.prepareDeviceObjects(device);
+      await this.connectDevice(device);
+    }
   }
 
   private async persistNativeConfig(): Promise<void> {
@@ -525,6 +599,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     if (relativeId === "discovery.scanNow") {
       if (this.currentConfig.enableMdnsDiscovery === true) {
         const discoveryResult = await this.runMdnsDiscoveryScan();
+        if (this.currentConfig.autoAddDiscoveredDevices === true) {
+          await this.addOrEnableConfiguredDevicesFromDiscovery(discoveryResult.matched, true);
+        }
         if (this.currentConfig.autoUpdateDiscoveredHosts === true) {
           await this.updateConfiguredHostsFromDiscovery(discoveryResult.matched, true);
         }

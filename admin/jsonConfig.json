@@ -46,14 +46,14 @@
         "autoUpdateDiscoveredHosts": {
           "type": "checkbox",
           "label": "Update hosts from discovered appliances",
-          "help": "Prepared for a later PR. Currently discovered hosts are only shown in discovery states.",
+          "help": "Automatically updates the host/IP address of existing configured appliances from safe mDNS matches.",
           "sm": 12,
           "md": 6
         },
         "autoAddDiscoveredDevices": {
           "type": "checkbox",
-          "label": "Add discovered appliances automatically",
-          "help": "Prepared for a later PR. Currently discovered appliances are not added automatically.",
+          "label": "Automatically enable/add discovered appliances",
+          "help": "Automatically enables or adds uniquely discovered appliances to the device table when a matching profile ZIP is available.",
           "sm": 12,
           "md": 6
         },

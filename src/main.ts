@@ -22,6 +22,7 @@ import { loadProfiles } from "./lib/profile";
 import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/reconnectPolicy";
 import { RunningDevice, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
+import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
 import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue, StateTarget } from "./lib/types";
 
@@ -93,6 +94,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         blockedCommands: [],
         stateValuesByFeature: new Map<string, ioBroker.StateValue>(),
         rawValuesByFeature: new Map<string, unknown>(),
+        eventValuesByFeature: new Map<string, ioBroker.StateValue>(),
         programExecutionByFeature: new Map<string, string>(),
         lastSelectedProgramRaw: undefined,
         lastOptionContextProgramRaw: undefined,
@@ -234,6 +236,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
     await ensureDiagnosticStates(this, device);
     await this.ensureProgramStates(device);
+    await this.ensureEventSummaryStates(device);
     await this.prepareRootProgramAliasObjects(device);
 
     await this.ensureStateObject(`${baseId}.settings.PowerState`, "BSH.Common.Setting.PowerState", false, "switch", true);
@@ -305,6 +308,19 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.ensureStateObject(`${device.baseId}.program.RootActiveProgram`, ACTIVE_PROGRAM_FEATURE, "", "value", true, programStates);
       this.registerWritableState(device, `${device.baseId}.program.RootActiveProgram`, activeUid, ACTIVE_PROGRAM_FEATURE, "value");
     }
+  }
+
+
+  private async ensureEventSummaryStates(device: RunningDevice): Promise<void> {
+    await this.ensureStateObject(`${device.baseId}.status.eventSummary_de`, "Active event summary (German)", "", "text");
+    await this.ensureStateObject(`${device.baseId}.status.activeEventsJson`, "Active events JSON", "[]", "json");
+    await this.updateEventSummary(device);
+  }
+
+  private async updateEventSummary(device: RunningDevice): Promise<void> {
+    const items = activeEventSummaryItems(device.eventValuesByFeature);
+    await this.setState(`${device.baseId}.status.eventSummary_de`, activeEventSummaryTextDe(items), true);
+    await this.setState(`${device.baseId}.status.activeEventsJson`, JSON.stringify(items), true);
   }
 
   private async prepareCommandObjects(device: RunningDevice): Promise<void> {
@@ -706,6 +722,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.writeEnumCompanionStates(device, target);
     device.stateValuesByFeature.set(target.name, normalizedValue);
     device.rawValuesByFeature.set(target.name, target.rawValue);
+    if (target.category === "events") device.eventValuesByFeature.set(target.name, normalizedValue);
     this.updateProgramOptionContextMarker(device, target);
     await this.writeRootProgramAliasValues(device, target, normalizedValue);
     if (isWritable) {
@@ -717,6 +734,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.ensureStateObject(`${device.baseId}.raw.uid_${target.uid}`, `Raw ${target.uid} ${target.name}`, "", "json");
       await this.setState(`${device.baseId}.raw.uid_${target.uid}`, JSON.stringify(value), true);
     }
+    if (target.category === "events") await this.updateEventSummary(device);
     if (target.name.includes(".Program.") || target.name.includes(".Setting.Favorite.")) await this.updateProgramList(device);
   }
 
@@ -766,7 +784,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private commonMetadata(device: RunningDevice, target: StateTarget, raw: unknown): StateCommonMetadata | undefined {
     const change = raw && typeof raw === "object" && !Array.isArray(raw) ? metadataFromDescriptionChange(raw as Record<string, unknown>) : undefined;
     const programStates = target.name === SELECTED_PROGRAM_FEATURE || target.name === ACTIVE_PROGRAM_FEATURE ? this.programStatesMetadata(device) : undefined;
-    return mergeMetadata(metadataForFeature(target.name, target.uid, device.profile), change, programStates);
+    return mergeMetadata(change, metadataForFeature(target.name, target.uid, device.profile), programStates);
   }
 
   private async writeEnumCompanionStates(device: RunningDevice, target: StateTarget): Promise<void> {

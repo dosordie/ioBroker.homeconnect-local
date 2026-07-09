@@ -130,3 +130,53 @@ test("discovered appliance has no brand type vib match when ambiguous", () => {
   ];
   assert.equal(matchDiscoveredDeviceToProfile({ brand: "Bosch", type: "Dishwasher", vib: "SMV123" }, profiles), undefined);
 });
+
+const { updateConfiguredDeviceHostsFromDiscovery } = require("../build/lib/discoveryConfigUpdate");
+
+function hostUpdateMatch(overrides) {
+  return {
+    discovery: { address: "192.0.2.20", host: "appliance.local" },
+    profile: { haId: "ha-1", connectionType: "TLS" },
+    match: "haId",
+    ...overrides,
+  };
+}
+
+function configuredDevice(overrides) {
+  return { enabled: true, haId: "ha-1", host: "192.0.2.10", name: "Device", connectionType: "TLS", ...overrides };
+}
+
+test("discovery host update changes configured host for haId matches", () => {
+  const result = updateConfiguredDeviceHostsFromDiscovery([configuredDevice({})], [hostUpdateMatch({ match: "haId" })]);
+  assert.equal(result.devices[0].host, "192.0.2.20");
+  assert.deepEqual(result.updates, [{ haId: "ha-1", oldHost: "192.0.2.10", newHost: "192.0.2.20", match: "haId" }]);
+});
+
+test("discovery host update changes configured host for mac matches", () => {
+  const result = updateConfiguredDeviceHostsFromDiscovery([configuredDevice({})], [hostUpdateMatch({ match: "mac" })]);
+  assert.equal(result.devices[0].host, "192.0.2.20");
+  assert.equal(result.updates[0].match, "mac");
+});
+
+test("discovery host update skips brand type vib matches", () => {
+  const result = updateConfiguredDeviceHostsFromDiscovery([configuredDevice({})], [hostUpdateMatch({ match: "brandTypeVib" })]);
+  assert.equal(result.devices[0].host, "192.0.2.10");
+  assert.equal(result.updates.length, 0);
+});
+
+test("discovery host update skips matches without discovered host", () => {
+  const result = updateConfiguredDeviceHostsFromDiscovery([configuredDevice({})], [hostUpdateMatch({ discovery: {} })]);
+  assert.equal(result.devices[0].host, "192.0.2.10");
+  assert.equal(result.updates.length, 0);
+});
+
+test("discovery host update skips unchanged hosts", () => {
+  const result = updateConfiguredDeviceHostsFromDiscovery([configuredDevice({ host: "192.0.2.20" })], [hostUpdateMatch({})]);
+  assert.equal(result.devices[0].host, "192.0.2.20");
+  assert.equal(result.updates.length, 0);
+});
+
+test("discovery host update prefers IP address over local hostname", () => {
+  const result = updateConfiguredDeviceHostsFromDiscovery([configuredDevice({})], [hostUpdateMatch({ discovery: { address: "192.0.2.30", host: "preferred-only-when-no-address.local" } })]);
+  assert.equal(result.devices[0].host, "192.0.2.30");
+});

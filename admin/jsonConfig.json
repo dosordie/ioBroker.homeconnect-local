@@ -28,6 +28,35 @@
           "sm": 12,
           "md": 12
         },
+        "enableMdnsDiscovery": {
+          "type": "checkbox",
+          "label": "Enable mDNS discovery",
+          "help": "Searches the local network for Home Connect appliances via _homeconnect._tcp.local. Discovery only writes discovery states and does not change device configuration yet.",
+          "sm": 12,
+          "md": 6
+        },
+        "mdnsDiscoveryTimeout": {
+          "type": "number",
+          "label": "mDNS discovery timeout in seconds",
+          "help": "How long each Home Connect mDNS discovery scan listens for responses.",
+          "min": 1,
+          "sm": 12,
+          "md": 6
+        },
+        "autoUpdateDiscoveredHosts": {
+          "type": "checkbox",
+          "label": "Update hosts from discovered appliances",
+          "help": "Prepared for a later PR. Currently discovered hosts are only shown in discovery states.",
+          "sm": 12,
+          "md": 6
+        },
+        "autoAddDiscoveredDevices": {
+          "type": "checkbox",
+          "label": "Add discovered appliances automatically",
+          "help": "Prepared for a later PR. Currently discovered appliances are not added automatically.",
+          "sm": 12,
+          "md": 6
+        },
         "appName": {
           "type": "text",
           "label": "App name",

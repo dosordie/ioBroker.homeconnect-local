@@ -2,9 +2,13 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.15",
+    "version": "0.0.16",
     "icon": "homeconnect-local.svg",
     "news": {
+      "0.0.16": {
+        "en": "Adds optional mDNS discovery for local Home Connect appliances.",
+        "de": "Ergänzt optionale mDNS-Erkennung für lokale Home-Connect-Geräte."
+      },
       "0.0.15": {
         "en": "Adds workflow fixes and prepares the first main branch release candidate.",
         "de": "Ergänzt Workflow-Korrekturen und bereitet den ersten Release-Kandidaten auf main vor."
@@ -117,7 +121,11 @@
     "debugRaw": false,
     "autoAddProfiles": true,
     "devices": [],
-    "enableRawStates": false
+    "enableRawStates": false,
+    "enableMdnsDiscovery": false,
+    "mdnsDiscoveryTimeout": 10,
+    "autoUpdateDiscoveredHosts": false,
+    "autoAddDiscoveredDevices": false
   },
   "objects": [
     {

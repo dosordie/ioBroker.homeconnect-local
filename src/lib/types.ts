@@ -64,6 +64,10 @@ export interface AdapterNativeConfig {
   debugRaw?: boolean;
   enableRawStates?: boolean;
   autoAddProfiles?: boolean;
+  enableMdnsDiscovery?: boolean;
+  mdnsDiscoveryTimeout?: number;
+  autoUpdateDiscoveredHosts?: boolean;
+  autoAddDiscoveredDevices?: boolean;
   devices?: ConfiguredDevice[];
 }
 

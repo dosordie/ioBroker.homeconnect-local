@@ -59,3 +59,53 @@ test("forecast and telemetry options stay read-only despite program readWrite ac
   assert.equal(hasWritableProgramOption(profile, "0300"), false);
   assert.equal(hasWritableProgramOption(profile, "0400"), false);
 });
+
+const { normalizeMac, matchDiscoveredDeviceToProfile } = require("../build/lib/mdnsDiscovery");
+
+function discoveryProfile(overrides) {
+  return {
+    haId: "ha-1",
+    type: "Dishwasher",
+    brand: "Bosch",
+    vib: "SMV123",
+    mac: "AA:BB:CC:DD:EE:FF",
+    connectionType: "TLS",
+    key: "key",
+    featureMapping: { featuresByUid: {}, enumTypeByUid: {}, enumValuesByType: {}, programOptionsByUid: {} },
+    ...overrides,
+  };
+}
+
+test("normalizeMac accepts common MAC address formats", () => {
+  assert.equal(normalizeMac("AA:BB:CC:DD:EE:FF"), "aabbccddeeff");
+  assert.equal(normalizeMac("aa-bb-cc-dd-ee-ff"), "aabbccddeeff");
+  assert.equal(normalizeMac("aabb.ccdd.eeff"), "aabbccddeeff");
+  assert.equal(normalizeMac("not-a-mac"), undefined);
+});
+
+test("discovered appliance matches profile by haId first", () => {
+  const profile = discoveryProfile({ haId: "ha-target", mac: "11:22:33:44:55:66" });
+  const match = matchDiscoveredDeviceToProfile({ id: "ha-target", mac: "AA:BB:CC:DD:EE:FF" }, [profile]);
+  assert.equal(match && match.profile.haId, "ha-target");
+  assert.equal(match && match.match, "haId");
+});
+
+test("discovered appliance matches profile by normalized mac", () => {
+  const match = matchDiscoveredDeviceToProfile({ mac: "aa-bb-cc-dd-ee-ff" }, [discoveryProfile({})]);
+  assert.equal(match && match.profile.haId, "ha-1");
+  assert.equal(match && match.match, "mac");
+});
+
+test("discovered appliance matches by brand type and vib only when unique", () => {
+  const match = matchDiscoveredDeviceToProfile({ brand: "bosch", type: "dishwasher", vib: "smv123" }, [discoveryProfile({ mac: undefined })]);
+  assert.equal(match && match.profile.haId, "ha-1");
+  assert.equal(match && match.match, "brandTypeVib");
+});
+
+test("discovered appliance has no brand type vib match when ambiguous", () => {
+  const profiles = [
+    discoveryProfile({ haId: "ha-1", mac: undefined }),
+    discoveryProfile({ haId: "ha-2", mac: undefined }),
+  ];
+  assert.equal(matchDiscoveredDeviceToProfile({ brand: "Bosch", type: "Dishwasher", vib: "SMV123" }, profiles), undefined);
+});

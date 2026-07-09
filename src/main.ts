@@ -24,6 +24,7 @@ import { RunningDevice, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
 import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
 import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
+import { hasWritableProgramOption, isProgramOptionDescriptionWritable, isReadOnlyProgramOption, isWritableAccess, normalizedAccess } from "./lib/optionWriteability";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue, StateTarget } from "./lib/types";
 
 class HomeconnectLocalAdapter extends utils.Adapter {
@@ -566,9 +567,12 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     if (programOptions) {
       for (const programOption of programOptions) {
         const uid = programOption.refUID;
-        if (!device.writableUids.has(uid)) continue;
-        const featureName = device.profile.featureMapping.featuresByUid[uid];
+        const featureName = device.profile.featureMapping.featuresByUid[normalizeUid(uid) ?? uid];
         if (!featureName || !featureName.includes(".Option.")) continue;
+        if (isReadOnlyProgramOption(featureName)) continue;
+        const programOptionWritable = isProgramOptionDescriptionWritable(programOption);
+        const normalizedUid = normalizeUid(uid) ?? uid;
+        if (!device.writableUids.has(normalizedUid) && !programOptionWritable) continue;
         if (!device.rawValuesByFeature.has(featureName) && !device.stateValuesByFeature.has(featureName)) continue;
 
         const numericUid = this.uidStringToNumber(uid);
@@ -686,12 +690,12 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     for (const value of device.mapper.valuesFromMessageData(data)) {
       const uid = normalizeUid(value.uid);
       if (!uid) continue;
-      const access = typeof value.access === "string" ? value.access : "";
+      const access = normalizedAccess(value.access);
       const targetFeature = device.profile.featureMapping.featuresByUid[uid];
       const execution = typeof value.execution === "string" ? value.execution : undefined;
       if (execution && targetFeature?.includes(".Program.")) device.programExecutionByFeature.set(targetFeature, execution);
-      if (access === "READWRITE") device.writableUids.add(uid);
-      else if (access === "READ" || access === "NONE") device.writableUids.delete(uid);
+      if (isWritableAccess(access)) device.writableUids.add(uid);
+      else if (access === "read" || access === "none") device.writableUids.delete(uid);
       const target = device.mapper.toStateTarget({ uid, value: "" });
       if (!target) continue;
       const stateId = `${device.baseId}.${target.id}`;
@@ -847,7 +851,11 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     if (target.uid === POWER_STATE_UID) return true;
     if (target.name === SELECTED_PROGRAM_FEATURE) return true;
     if (target.name === ACTIVE_PROGRAM_FEATURE) return true;
-    return device.writableUids.has(target.uid) && (target.category === "settings" || target.category === "options" || target.category === "program");
+    if (target.category === "options") {
+      if (isReadOnlyProgramOption(target.name)) return false;
+      return device.writableUids.has(target.uid) || hasWritableProgramOption(device.profile, target.uid);
+    }
+    return device.writableUids.has(target.uid) && (target.category === "settings" || target.category === "program");
   }
 
   private registerWritableState(device: RunningDevice, stateId: string, uid: number, featureName: string, kind: WritableState["kind"]): void {

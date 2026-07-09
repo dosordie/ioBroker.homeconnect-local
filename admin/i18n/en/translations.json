@@ -23,5 +23,13 @@
   "Profile file": "Profile file",
   "Create raw UID states": "Create raw UID states",
   "Creates debug states raw.uid_<uid> with raw Home Connect values.": "Creates debug states raw.uid_<uid> with raw Home Connect values.",
-  "Log received raw /ro values": "Log received raw /ro values"
+  "Log received raw /ro values": "Log received raw /ro values",
+  "Enable mDNS discovery": "Enable mDNS discovery",
+  "Searches the local network for Home Connect appliances via _homeconnect._tcp.local. Discovery only writes discovery states and does not change device configuration yet.": "Searches the local network for Home Connect appliances via _homeconnect._tcp.local. Discovery only writes discovery states and does not change device configuration yet.",
+  "mDNS discovery timeout in seconds": "mDNS discovery timeout in seconds",
+  "How long each Home Connect mDNS discovery scan listens for responses.": "How long each Home Connect mDNS discovery scan listens for responses.",
+  "Update hosts from discovered appliances": "Update hosts from discovered appliances",
+  "Prepared for a later PR. Currently discovered hosts are only shown in discovery states.": "Prepared for a later PR. Currently discovered hosts are only shown in discovery states.",
+  "Add discovered appliances automatically": "Add discovered appliances automatically",
+  "Prepared for a later PR. Currently discovered appliances are not added automatically.": "Prepared for a later PR. Currently discovered appliances are not added automatically."
 }

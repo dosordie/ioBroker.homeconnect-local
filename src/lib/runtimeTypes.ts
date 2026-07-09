@@ -15,6 +15,7 @@ export interface RunningDevice {
   blockedCommands: string[];
   stateValuesByFeature: Map<string, ioBroker.StateValue>;
   rawValuesByFeature: Map<string, unknown>;
+  eventValuesByFeature: Map<string, ioBroker.StateValue>;
   programExecutionByFeature: Map<string, string>;
   lastSelectedProgramRaw?: unknown;
   lastOptionContextProgramRaw?: unknown;

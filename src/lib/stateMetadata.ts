@@ -11,6 +11,7 @@ export interface StateCommonMetadata {
 const KNOWN_FEATURE_METADATA: Array<{ pattern: RegExp; metadata: StateCommonMetadata }> = [
   { pattern: /(?:RemainingTime|Duration|StartInRelative|FinishInRelative)$/i, metadata: { unit: "s" } },
   { pattern: /ProgramProgress$/i, metadata: { unit: "%", min: 0, max: 100 } },
+  { pattern: /(?:WaterForecast|EnergyForecast)$/i, metadata: { unit: "%" } },
   { pattern: /Temperature/i, metadata: { unit: "°C" } },
   { pattern: /(?:^|\.)Power(?:\.|$)/i, metadata: { unit: "W" } },
   { pattern: /Energy/i, metadata: { unit: "kWh" } },

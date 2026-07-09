@@ -2,6 +2,10 @@ import { lastMeaningfulNamePart, normalizeUid, sanitizeObjectId } from "./ids";
 import { ApplianceProfile, RoValue, StateTarget } from "./types";
 
 const PHASE_NAMES = new Set(["ProgramPhase", "ProcessPhase"]);
+const IDLE_LAUNDRY_PROCESS_PHASE_FEATURES = new Set([
+  "LaundryCare.Common.Option.ProcessPhase",
+  "LaundryCare.Dryer.Option.ProcessPhase",
+]);
 
 export class StateMapper {
   public constructor(private readonly profile: ApplianceProfile) {}
@@ -33,6 +37,12 @@ export class StateMapper {
     }
 
     const featureName = this.profile.featureMapping.featuresByUid[uid] ?? `uid_${uid}`;
+    if (IDLE_LAUNDRY_PROCESS_PHASE_FEATURES.has(featureName) && value.value === 255) {
+      const rawStateName = lastMeaningfulNamePart(featureName);
+      const stateName = sanitizeObjectId(this.stateNameFor(featureName, rawStateName));
+      const category = this.categoryFor(featureName, stateName);
+      return { id: `${category}.${stateName}`, name: featureName, value: "", rawValue: value.value, category, uid };
+    }
     const rawStateName = lastMeaningfulNamePart(featureName);
     const stateName = sanitizeObjectId(this.stateNameFor(featureName, rawStateName));
     const category = this.categoryFor(featureName, stateName);

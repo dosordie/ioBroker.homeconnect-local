@@ -29,6 +29,7 @@ import { coerceStateValueForObjectType, finalProgramEndCompanionTargets, finalPr
 import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
 import { mergeStartOptionValues, shouldSendAutomaticStartOption } from "./lib/startOptions";
 import { evaluateStartAvailability, StartAvailability } from "./lib/startAvailability";
+import { evaluateEffectivePowerState, POWER_STATE_FEATURE } from "./lib/effectivePowerState";
 import { hasWritableProgramOption, isProgramOptionDescriptionWritable, isReadOnlyProgramOption, isWritableAccess, normalizedAccess } from "./lib/optionWriteability";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue, StateTarget } from "./lib/types";
 
@@ -501,6 +502,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.ensureChannel(`${baseId}.${channel}`, channel);
     }
     await ensureDiagnosticStates(this, device);
+    await this.ensureEffectivePowerStateObjects(device);
     await this.ensureStartAvailabilityStates(device);
     await this.ensureProgramStates(device);
     await this.ensureEventSummaryStates(device);
@@ -544,6 +546,20 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     } catch (error) {
       this.log.warn(`${device.profile.haId}: deleting obsolete object folder ${id} failed: ${String(error)}`);
     }
+  }
+
+  private async ensureEffectivePowerStateObjects(device: RunningDevice): Promise<void> {
+    await this.ensureStateObject(`${device.baseId}.status.effectivePowerState`, "Effective power state", "Offline", "text");
+    await this.ensureStateObject(`${device.baseId}.status.effectivePowerState_de`, "Effective power state (German)", "Aus / offline", "text");
+    await this.ensureStateObject(`${device.baseId}.status.isEffectivelyOn`, "Device is effectively on", false, "indicator");
+    await this.updateEffectivePowerState(device);
+  }
+
+  private async updateEffectivePowerState(device: RunningDevice): Promise<void> {
+    const state = evaluateEffectivePowerState(device);
+    await this.setState(`${device.baseId}.status.effectivePowerState`, state.effectivePowerState, true);
+    await this.setState(`${device.baseId}.status.effectivePowerState_de`, state.effectivePowerStateDe, true);
+    await this.setState(`${device.baseId}.status.isEffectivelyOn`, state.isEffectivelyOn, true);
   }
 
   private async ensureStartAvailabilityStates(device: RunningDevice): Promise<void> {
@@ -1045,6 +1061,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.setState(`${device.baseId}.info.lastError`, error instanceof Error ? error.message : String(error), true);
     }
     await this.updateGlobalConnectionState();
+    await this.updateEffectivePowerState(device);
     await this.updateStartAvailability(device);
   }
 
@@ -1116,6 +1133,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     this.updateProgramOptionContextMarker(device, target);
     await this.writeRootProgramAliasValues(device, target, normalizedValue);
     await this.updateStartAvailability(device);
+    if (target.name === POWER_STATE_FEATURE) await this.updateEffectivePowerState(device);
     if (isWritable) {
       const numericUid = this.uidStringToNumber(target.uid);
       if (numericUid !== undefined) this.registerWritableState(device, stateId, numericUid, target.name, "value");

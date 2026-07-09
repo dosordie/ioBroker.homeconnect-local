@@ -62,6 +62,7 @@ export interface AdapterNativeConfig {
   appId?: string;
   reconnectInterval?: number;
   debugRaw?: boolean;
+  enableRawStates?: boolean;
   autoAddProfiles?: boolean;
   devices?: ConfiguredDevice[];
 }

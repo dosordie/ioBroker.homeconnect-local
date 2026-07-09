@@ -96,7 +96,7 @@ export class StateMapper {
     }
 
     if (featureName.includes(".Program.")) {
-      return "programs";
+      return "availablePrograms";
     }
 
     return "raw";

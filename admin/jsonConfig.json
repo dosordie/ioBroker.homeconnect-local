@@ -49,7 +49,14 @@
         },
         "debugRaw": {
           "type": "checkbox",
-          "label": "Create raw uid states and log received /ro values",
+          "label": "Log received raw /ro values",
+          "sm": 12,
+          "md": 6
+        },
+        "enableRawStates": {
+          "type": "checkbox",
+          "label": "Create raw UID states",
+          "help": "Creates debug states raw.uid_<uid> with raw Home Connect values.",
           "sm": 12,
           "md": 6
         },

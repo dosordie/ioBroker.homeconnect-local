@@ -70,31 +70,54 @@
       "en": "Local LAN monitoring for Bosch/Siemens/BSH Home Connect appliances without using the cloud API during runtime.",
       "de": "Lokales LAN-Monitoring für Bosch/Siemens/BSH Home-Connect-Geräte ohne Cloud-API im laufenden Betrieb."
     },
-    "authors": ["dosordie"],
-    "keywords": ["homeconnect", "home-connect", "bosch", "siemens", "bsh", "local", "lan"],
+    "authors": [
+      "dosordie"
+    ],
+    "keywords": [
+      "homeconnect",
+      "home-connect",
+      "bosch",
+      "siemens",
+      "bsh",
+      "local",
+      "lan"
+    ],
     "license": "MIT",
     "platform": "Javascript/Node.js",
     "mode": "daemon",
     "enabled": true,
     "readme": "https://github.com/dosordie/ioBroker.homeconnect-local/blob/main/README.md",
     "loglevel": "info",
-    "restartAdapters": ["homeconnect-local"],
+    "restartAdapters": [
+      "homeconnect-local"
+    ],
     "type": "household",
     "compact": true,
     "connectionType": "local",
     "dataSource": "push",
-    "adminUI": {"config": "json"},
-    "dependencies": [{"js-controller": ">=5.0.0"}],
-    "globalDependencies": [{"admin": ">=6.0.0"}]
+    "adminUI": {
+      "config": "json"
+    },
+    "dependencies": [
+      {
+        "js-controller": ">=5.0.0"
+      }
+    ],
+    "globalDependencies": [
+      {
+        "admin": ">=6.0.0"
+      }
+    ]
   },
   "native": {
     "profilePath": "/opt/iobroker/iobroker-data/files/0_userdata.0/homeconnect-lokal-zip",
     "appName": "ioBroker HomeConnect Local",
     "appId": "iobroker-homeconnect-local",
     "reconnectInterval": 30,
-    "debugRaw": true,
+    "debugRaw": false,
     "autoAddProfiles": true,
-    "devices": []
+    "devices": [],
+    "enableRawStates": false
   },
   "objects": [
     {

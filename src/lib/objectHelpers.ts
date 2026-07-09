@@ -19,6 +19,29 @@ export async function ensureStateObject(adapter: ioBroker.Adapter, id: string, n
   }
 }
 
+export async function ensureButtonStateObject(adapter: ioBroker.Adapter, id: string, name: string): Promise<void> {
+  const common = {
+    name,
+    type: "boolean",
+    role: "button",
+    read: true,
+    write: true,
+    def: false,
+    states: undefined,
+    min: undefined,
+    max: undefined,
+    step: undefined,
+  } as ioBroker.StateCommon;
+  const existing = await adapter.getObjectAsync(id);
+  if (!existing) {
+    await adapter.setObjectNotExistsAsync(id, { type: "state", common, native: {} });
+    return;
+  }
+  if (existing.type !== "state" || commonChanged(existing.common as ioBroker.StateCommon | undefined, common)) {
+    await adapter.extendObjectAsync(id, { type: "state", common, native: existing.native ?? {} });
+  }
+}
+
 export async function setTextState(adapter: ioBroker.Adapter, id: string, value: unknown): Promise<void> {
   await adapter.setState(id, value === undefined || value === null ? "" : String(value), true);
 }

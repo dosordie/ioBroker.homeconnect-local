@@ -2,7 +2,7 @@ import * as utils from "@iobroker/adapter-core";
 
 import { HomeConnectClient } from "./lib/client";
 import { ensureDiagnosticStates, writeApplianceInfo, writeNetworkInfo, writeRegisteredDevices, writeServiceInfo } from "./lib/diagnosticsWriter";
-import { ensureChannel, ensureStateObject, setBooleanState, setNumberState, setTextState } from "./lib/objectHelpers";
+import { ensureButtonStateObject, ensureChannel, ensureStateObject, setBooleanState, setNumberState, setTextState } from "./lib/objectHelpers";
 import { translateEnumValue } from "./lib/enumTranslations";
 import { displayNameForProgram, programStatesForDevice, resolveProgramKeyForDevice } from "./lib/programStates";
 import { mergeMetadata, metadataForFeature, metadataFromDescriptionChange, StateCommonMetadata } from "./lib/stateMetadata";
@@ -286,7 +286,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       const numericUid = this.uidStringToNumber(uid);
       if (numericUid === undefined) continue;
       const stateId = `${device.baseId}.commands.${sanitizeObjectId(featureName.split(".Command.")[1] ?? featureName)}`;
-      await this.ensureStateObject(stateId, featureName, false, "button", true);
+      await this.ensureCommandStateObject(stateId, featureName);
       this.registerWritableState(device, stateId, numericUid, featureName, "command");
     }
     await this.setState(`${device.baseId}.expertCommands.blockedList`, JSON.stringify(device.blockedCommands), true);
@@ -300,9 +300,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const activeProgramUid = this.uidForFeature(device.profile, ACTIVE_PROGRAM_FEATURE);
     if (activeProgramUid === undefined) return;
     this.registerWritableState(device, `${device.baseId}.program.startProgramName`, activeProgramUid, ACTIVE_PROGRAM_FEATURE, "startProgramName");
-    await this.ensureStateObject(`${device.baseId}.commands.StartProgram`, "Start selected program", false, "button", true);
+    await this.ensureCommandStateObject(`${device.baseId}.commands.StartProgram`, "Start selected program");
     this.registerWritableState(device, `${device.baseId}.commands.StartProgram`, activeProgramUid, ACTIVE_PROGRAM_FEATURE, "startProgram");
-    await this.ensureStateObject(`${device.baseId}.commands.StartProgramWithOptions`, "Start selected program with program.startOptionsJson", false, "button", true);
+    await this.ensureCommandStateObject(`${device.baseId}.commands.StartProgramWithOptions`, "Start selected program with program.startOptionsJson");
     this.registerWritableState(device, `${device.baseId}.commands.StartProgramWithOptions`, activeProgramUid, ACTIVE_PROGRAM_FEATURE, "startProgramWithOptions");
   }
 
@@ -349,15 +349,20 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const relativeId = id.startsWith(`${this.namespace}.`) ? id.slice(this.namespace.length + 1) : id;
     const writableState = this.writableStates.get(relativeId);
     if (!writableState) return;
+    const resetCommandState = writableState.kind === "command" || writableState.kind === "startProgram" || writableState.kind === "startProgramWithOptions";
     const device = this.devices.get(writableState.deviceHaId);
     if (!device?.client) {
       this.log.warn(`${relativeId}: cannot write ${writableState.featureName}, device is not connected`);
+      if (resetCommandState) await this.resetCommandState(writableState);
       return;
     }
 
     try {
       const rawValue = await this.valueForWrite(device, writableState, state.val);
-      if (rawValue === undefined) return;
+      if (rawValue === undefined) {
+        if (resetCommandState) await this.resetCommandState(writableState);
+        return;
+      }
 
       if (writableState.kind === "startProgramWithOptions") {
         await this.writeStartProgram(device, rawValue, await this.startOptionValuesFromState(device, rawValue));
@@ -377,16 +382,22 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         await device.client.writeValue(writableState.uid, rawValue);
       }
 
-      if (writableState.kind === "command" || writableState.kind === "startProgram" || writableState.kind === "startProgramWithOptions") {
-        await this.setState(writableState.stateId, true, true);
-        setTimeout(() => void this.setState(writableState.stateId, false, true).catch(error => {
-          this.log.warn(`${writableState.stateId}: resetting command state failed: ${String(error)}`);
-        }), 750);
+      if (resetCommandState) {
+        await this.resetCommandState(writableState);
       } else {
         await this.setState(writableState.stateId, this.normalizeWrittenAckValue(writableState, rawValue), true);
       }
     } catch (error) {
       this.log.warn(`${device.profile.haId}: writing ${writableState.featureName} failed: ${String(error)}`);
+      if (resetCommandState) await this.resetCommandState(writableState);
+    }
+  }
+
+  private async resetCommandState(writableState: WritableState): Promise<void> {
+    try {
+      await this.setState(writableState.stateId, false, true);
+    } catch (error) {
+      this.log.warn(`${writableState.stateId}: resetting command state failed: ${String(error)}`);
     }
   }
 
@@ -637,6 +648,11 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       const target = device.mapper.toStateTarget({ uid, value: "" });
       if (!target) continue;
       const stateId = `${device.baseId}.${target.id}`;
+      if (target.category === "commands") {
+        await this.prepareWritableCommandState(device, stateId, target);
+        await this.writeStateMetadata(device, target, access, value.available !== false, true, value.raw ?? value);
+        continue;
+      }
       const writable = this.canWriteTarget(device, target);
       await this.ensureStateObject(stateId, target.name, this.initialTargetValue(target), target.uid === POWER_STATE_UID ? "switch" : undefined, writable, this.commonMetadata(device, target, value));
       await this.writeStateMetadata(device, target, access, value.available !== false, writable, value.raw ?? value);
@@ -649,6 +665,12 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const target = device.mapper.toStateTarget(value);
     if (!target) return;
     const stateId = `${device.baseId}.${target.id}`;
+    if (target.category === "commands") {
+      await this.prepareWritableCommandState(device, stateId, target);
+      await this.setState(stateId, false, true);
+      await this.writeStateMetadata(device, target, undefined, true, true, value);
+      return;
+    }
     const normalizedValue = this.normalizeTargetValue(device, target);
     const isWritable = this.canWriteTarget(device, target);
     await this.ensureStateObject(stateId, target.name, normalizedValue, target.uid === POWER_STATE_UID ? "switch" : undefined, isWritable, this.commonMetadata(device, target, value));
@@ -833,6 +855,17 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private async ensureStateObject(id: string, name: string, value: ioBroker.StateValue, role?: string, write = false, metadata?: StateCommonMetadata): Promise<void> {
     await ensureStateObject(this, id, name, value, role, write, metadata);
+  }
+
+  private async ensureCommandStateObject(id: string, name: string): Promise<void> {
+    await ensureButtonStateObject(this, id, name);
+  }
+
+  private async prepareWritableCommandState(device: RunningDevice, stateId: string, target: StateTarget): Promise<void> {
+    if (this.isDangerousCommand(target.name)) return;
+    await this.ensureCommandStateObject(stateId, target.name);
+    const numericUid = this.uidStringToNumber(target.uid);
+    if (numericUid !== undefined) this.registerWritableState(device, stateId, numericUid, target.name, "command");
   }
 
   private uidForFeature(profile: ApplianceProfile, featureName: string): number | undefined {

@@ -1018,8 +1018,11 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         device.readOnlyUids.delete(uid);
       } else if (access) {
         device.writableUids.delete(uid);
-        if (access === "read" || access === "none") device.readOnlyUids.add(uid);
-        else device.readOnlyUids.delete(uid);
+        if (access === "read" || access === "none") {
+          device.readOnlyUids.add(uid);
+        } else {
+          device.readOnlyUids.delete(uid);
+        }
       }
       const target = device.mapper.toStateTarget({ uid, value: "" });
       if (!target) continue;

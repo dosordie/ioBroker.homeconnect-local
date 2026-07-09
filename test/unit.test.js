@@ -622,13 +622,13 @@ test("ProgramAborted event summary text is neutral", () => {
 
 const { parseMessage } = require("../build/lib/message");
 const { parseRepairedAllMandatoryValuesResponse } = require("../build/lib/client");
-const { recordHomeConnectFrame, shouldHeartbeatDevice } = require("../build/lib/runtimeTypes");
+const { calculateIdleSeconds, recordHomeConnectFrame, shouldHeartbeatDevice, WATCHDOG_HEARTBEAT_REQUEST } = require("../build/lib/runtimeTypes");
 
 function watchdogDevice(overrides = {}) {
   return {
     connected: true,
     reconnecting: false,
-    client: { sendSync: async () => ({ resource: "/ci/services", action: "RESPONSE" }) },
+    client: { sendSync: async () => ({ resource: "/ni/info", version: 1, action: "RESPONSE" }) },
     ...overrides,
   };
 }
@@ -659,15 +659,37 @@ test("watchdog requests heartbeat when last traffic is too old", () => {
   assert.equal(shouldHeartbeatDevice(watchdogDevice({ lastRxAt: 1_000 }), 301_000), true);
 });
 
+
+test("watchdog heartbeat request uses /ni/info version 1", () => {
+  assert.deepEqual(WATCHDOG_HEARTBEAT_REQUEST, { resource: "/ni/info", version: 1, action: "GET" });
+  assert.notDeepEqual(WATCHDOG_HEARTBEAT_REQUEST, { resource: "/ci/services", version: 3, action: "GET" });
+});
+
+test("watchdog idle seconds are calculated before heartbeat response updates lastRxAt and never negative", () => {
+  const device = watchdogDevice({ lastRxAt: 1_000 });
+  const idleSeconds = calculateIdleSeconds(device.lastRxAt, 301_000);
+  recordHomeConnectFrame(device, WATCHDOG_HEARTBEAT_REQUEST.resource, 302_000);
+  assert.equal(idleSeconds, 300);
+  assert.equal(calculateIdleSeconds(device.lastRxAt, 301_000), 0);
+});
+
+test("watchdog idle seconds for Home Connect error responses are clamped to zero", () => {
+  const device = watchdogDevice({ lastRxAt: 301_500 });
+  recordHomeConnectFrame(device, WATCHDOG_HEARTBEAT_REQUEST.resource, 302_000);
+  const error = new Error(`Home Connect response code 404 (Not found) for ${WATCHDOG_HEARTBEAT_REQUEST.resource}`);
+  assert.equal(error.message.includes("404"), true);
+  assert.equal(calculateIdleSeconds(device.lastRxAt, 301_000), 0);
+});
+
 test("watchdog heartbeat success does not imply reconnect condition", async () => {
   let heartbeatCalls = 0;
   const device = watchdogDevice({
     lastRxAt: 1_000,
-    client: { sendSync: async () => { heartbeatCalls += 1; return { resource: "/ci/services", action: "RESPONSE" }; } },
+    client: { sendSync: async () => { heartbeatCalls += 1; return { resource: "/ni/info", version: 1, action: "RESPONSE" }; } },
   });
   assert.equal(shouldHeartbeatDevice(device, 301_000), true);
-  await device.client.sendSync({ resource: "/ci/services", action: "GET" });
-  recordHomeConnectFrame(device, "/ci/services", 301_000);
+  await device.client.sendSync(WATCHDOG_HEARTBEAT_REQUEST);
+  recordHomeConnectFrame(device, WATCHDOG_HEARTBEAT_REQUEST.resource, 301_000);
   assert.equal(heartbeatCalls, 1);
   assert.equal(shouldHeartbeatDevice(device, 301_001), false);
 });
@@ -681,7 +703,7 @@ test("watchdog heartbeat failure can be guarded to exactly one reconnect", async
   });
   if (shouldHeartbeatDevice(device, 301_000)) {
     device.watchdogHeartbeatInFlight = true;
-    try { await device.client.sendSync({ resource: "/ci/services", action: "GET" }); }
+    try { await device.client.sendSync(WATCHDOG_HEARTBEAT_REQUEST); }
     catch { reconnects += 1; device.reconnecting = true; }
     finally { device.watchdogHeartbeatInFlight = false; }
   }

@@ -176,6 +176,13 @@ test("discovery host update skips unchanged hosts", () => {
   assert.equal(result.updates.length, 0);
 });
 
+test("discovery host update exposes persisted condition via update count", () => {
+  const changed = updateConfiguredDeviceHostsFromDiscovery([configuredDevice({})], [hostUpdateMatch({})]);
+  const unchanged = updateConfiguredDeviceHostsFromDiscovery([configuredDevice({ host: "192.0.2.20" })], [hostUpdateMatch({})]);
+  assert.equal(changed.updates.length > 0, true);
+  assert.equal(unchanged.updates.length > 0, false);
+});
+
 test("discovery host update prefers IP address over local hostname", () => {
   const result = updateConfiguredDeviceHostsFromDiscovery([configuredDevice({})], [hostUpdateMatch({ discovery: { address: "192.0.2.30", host: "preferred-only-when-no-address.local" } })]);
   assert.equal(result.devices[0].host, "192.0.2.30");
@@ -220,6 +227,23 @@ test("discovery auto-add creates missing configured device for haId matches", ()
   assert.equal(result.devices[0].name, "Bosch SMV123 Dishwasher");
   assert.equal(result.devices[0].connectionType, "TLS");
   assert.deepEqual(result.added, [{ haId: "ha-1", host: "192.0.2.20", match: "haId" }]);
+});
+
+test("discovery auto-add exposes changed flag for persisted adapter config", () => {
+  const changed = addOrEnableConfiguredDevicesFromDiscovery([], [autoAddMatch({})]);
+  const unchanged = addOrEnableConfiguredDevicesFromDiscovery([configuredDevice({
+    enabled: true,
+    host: "192.0.2.20",
+    name: "Bosch SMV123 Dishwasher",
+    type: "Dishwasher",
+    brand: "Bosch",
+    vib: "SMV123",
+    mac: "AA:BB:CC:DD:EE:FF",
+    connectionType: "TLS",
+    profileFile: "profile.zip",
+  })], [autoAddMatch({})]);
+  assert.equal(changed.changed, true);
+  assert.equal(unchanged.changed, false);
 });
 
 test("discovery auto-add skips brand type vib matches", () => {

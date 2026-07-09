@@ -114,7 +114,7 @@
     ]
   },
   "native": {
-    "profilePath": "/opt/iobroker/iobroker-data/files/0_userdata.0/homeconnect-lokal-zip",
+    "profilePath": "/opt/iobroker/iobroker-data/files/0_userdata.0/",
     "appName": "ioBroker HomeConnect Local",
     "appId": "iobroker-homeconnect-local",
     "reconnectInterval": 30,

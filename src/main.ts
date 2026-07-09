@@ -45,16 +45,23 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   public constructor(options: Partial<utils.AdapterOptions> = {}) {
     super({ ...options, name: "homeconnect-local" });
-    this.on("ready", () => void this.onReady());
+    this.on("ready", () => void this.onReady().catch(error => {
+      if (!this.unloaded) this.log.error(`Startup failed: ${String(error)}`);
+    }));
     this.on("unload", callback => void this.onUnload(callback));
-    this.on("stateChange", (id, state) => void this.onStateChange(id, state));
+    this.on("stateChange", (id, state) => void this.onStateChange(id, state).catch(error => {
+      if (!this.unloaded) this.log.warn(`State change handling failed: ${String(error)}`);
+    }));
   }
 
   private async onReady(): Promise<void> {
     this.currentConfig = this.config as AdapterNativeConfig;
     await this.ensureInfoConnectionObject();
+    if (this.unloaded) return;
     await this.ensureDiscoveryObjects();
+    if (this.unloaded) return;
     await this.setState("info.connection", false, true);
+    if (this.unloaded) return;
     await this.setState("discovery.enabled", this.currentConfig.enableMdnsDiscovery === true, true);
     await this.subscribeStatesAsync("*.settings.*");
     await this.subscribeStatesAsync("*.options.*");
@@ -65,7 +72,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const profilePath = this.currentConfig.profilePath?.trim();
     if (!profilePath) {
       this.log.warn("No profilePath configured. Add a profile ZIP or extracted profile directory in the adapter settings.");
-      if (this.currentConfig.enableMdnsDiscovery === true) {
+      if (this.currentConfig.enableMdnsDiscovery === true && !this.unloaded) {
         await this.runMdnsDiscoveryScan([]);
       }
       return;
@@ -76,7 +83,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       profiles = loadProfiles(profilePath);
     } catch (error) {
       this.log.error(`Unable to load Home Connect profiles: ${String(error)}`);
-      if (this.currentConfig.enableMdnsDiscovery === true) {
+      if (this.currentConfig.enableMdnsDiscovery === true && !this.unloaded) {
         await this.runMdnsDiscoveryScan([]);
       }
       return;
@@ -85,6 +92,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     this.discoveryProfiles = profiles;
     this.log.info(`Loaded ${profiles.length} Home Connect profile(s) from ${profilePath}`);
     await this.syncConfiguredDevicesWithProfiles(profiles);
+    if (this.unloaded) return;
     const profilesByHaId = new Map(profiles.map(profile => [profile.haId, profile]));
 
     for (const profile of profiles) {
@@ -93,14 +101,26 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     if (this.currentConfig.enableMdnsDiscovery === true) {
       const discoveryResult = await this.runMdnsDiscoveryScan(profiles);
+      if (this.unloaded) return;
+
+      let configPersisted = false;
       if (this.currentConfig.autoAddDiscoveredDevices === true) {
-        await this.addOrEnableConfiguredDevicesFromDiscovery(discoveryResult.matched);
+        const autoAddResult = await this.addOrEnableConfiguredDevicesFromDiscovery(discoveryResult.matched);
+        if (this.unloaded) return;
+        configPersisted ||= autoAddResult.persisted;
       }
       if (this.currentConfig.autoUpdateDiscoveredHosts === true) {
-        await this.updateConfiguredHostsFromDiscovery(discoveryResult.matched);
+        const hostUpdateResult = await this.updateConfiguredHostsFromDiscovery(discoveryResult.matched);
+        if (this.unloaded) return;
+        configPersisted ||= hostUpdateResult.persisted;
+      }
+      if (configPersisted) {
+        this.log.info("Adapter configuration was updated from mDNS discovery; waiting for ioBroker restart before connecting appliances.");
+        return;
       }
     }
 
+    if (this.unloaded) return;
     for (const configuredDevice of this.currentConfig.devices ?? []) {
       if (!configuredDevice.enabled) {
         this.log.info(`${configuredDevice.haId || configuredDevice.name || "configured device"}: configured device is disabled, skipping connection`);
@@ -134,9 +154,12 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         lastOptionContextProgramRaw: undefined,
       };
 
+      if (this.unloaded) return;
       this.devices.set(profile.haId, device);
       await this.prepareDeviceObjects(device);
+      if (this.unloaded) return;
       await this.connectDevice(device);
+      if (this.unloaded) return;
     }
   }
 
@@ -160,16 +183,23 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async runMdnsDiscoveryScan(profiles = this.discoveryProfiles): Promise<DiscoveryScanResult> {
+    if (this.unloaded) return { found: [], matched: [], unmatched: [] };
     this.discoveredDevices.clear();
     let result = await this.writeDiscoveryStates(profiles);
+    if (this.unloaded) return result;
     startHomeConnectDiscovery(this, { timeoutSeconds: this.currentConfig.mdnsDiscoveryTimeout ?? 10 }, device => {
+      if (this.unloaded) return;
       const key = device.id || device.mac || device.address || device.host || device.name || JSON.stringify(device.rawTxt ?? {});
       this.discoveredDevices.set(key, device);
-      void this.writeDiscoveryStates(profiles);
+      void this.writeDiscoveryStates(profiles).catch(error => {
+        if (!this.unloaded) this.log.warn(`Writing mDNS discovery states failed: ${String(error)}`);
+      });
     });
     const timeoutMs = Math.max(1, Number(this.currentConfig.mdnsDiscoveryTimeout ?? 10)) * 1000;
     await new Promise(resolve => setTimeout(resolve, timeoutMs + 100));
+    if (this.unloaded) return result;
     result = await this.writeDiscoveryStates(profiles);
+    if (this.unloaded) return result;
     this.log.info(`mDNS discovery finished: ${result.found.length} found, ${result.matched.length} matched, ${result.unmatched.length} unmatched`);
     return result;
   }
@@ -188,6 +218,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         this.log.debug(`unmatched discovered appliance ${this.discoveryDisplayName(discovery)}`);
       }
     }
+    if (this.unloaded) return { found, matched, unmatched };
     await this.setState("discovery.enabled", this.currentConfig.enableMdnsDiscovery === true, true);
     await this.setState("discovery.lastScan", new Date().toISOString(), true);
     await this.setState("discovery.count", found.length, true);
@@ -199,7 +230,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     return { found, matched, unmatched };
   }
 
-  private async updateConfiguredHostsFromDiscovery(matches: DiscoveryProfileMatch[], updateRunningDevices = false): Promise<DiscoveryHostUpdate[]> {
+  private async updateConfiguredHostsFromDiscovery(matches: DiscoveryProfileMatch[], updateRunningDevices = false): Promise<{ updates: DiscoveryHostUpdate[]; persisted: boolean }> {
+    if (this.unloaded) return { updates: [], persisted: false };
     const result = updateConfiguredDeviceHostsFromDiscovery(this.currentConfig.devices ?? [], matches);
     for (const skipped of result.skippedWithoutConfiguredDevice) {
       this.log.info(
@@ -208,29 +240,34 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
 
     await this.writeUpdatedHostStates(result.updates);
-    if (result.updates.length === 0) return [];
+    if (this.unloaded) return { updates: result.updates, persisted: false };
+    if (result.updates.length === 0) return { updates: [], persisted: false };
 
     this.currentConfig = { ...this.currentConfig, devices: result.devices };
     await this.persistNativeConfig();
+    if (this.unloaded) return { updates: result.updates, persisted: true };
     this.log.info(`Updated ${result.updates.length} configured Home Connect host(s) from mDNS discovery. Refresh admin page to see changes.`);
 
     if (updateRunningDevices) {
       await this.applyDiscoveredHostsToRunningDevices(result.updates);
     }
-    return result.updates;
+    return { updates: result.updates, persisted: true };
   }
 
-  private async addOrEnableConfiguredDevicesFromDiscovery(matches: DiscoveryProfileMatch[], connectNewDevices = false): Promise<{ added: DiscoveryDeviceAdded[]; enabled: DiscoveryDeviceEnabled[] }> {
+  private async addOrEnableConfiguredDevicesFromDiscovery(matches: DiscoveryProfileMatch[], connectNewDevices = false): Promise<{ added: DiscoveryDeviceAdded[]; enabled: DiscoveryDeviceEnabled[]; persisted: boolean }> {
+    if (this.unloaded) return { added: [], enabled: [], persisted: false };
     const result = addOrEnableConfiguredDevicesFromDiscovery(this.currentConfig.devices ?? [], matches);
     await this.writeAutoAddedDeviceStates(result.added, result.enabled);
-    if (!result.changed) return { added: [], enabled: [] };
+    if (this.unloaded) return { added: result.added, enabled: result.enabled, persisted: false };
+    if (!result.changed) return { added: [], enabled: [], persisted: false };
 
     this.currentConfig = { ...this.currentConfig, devices: result.devices };
     await this.persistNativeConfig();
+    if (this.unloaded) return { added: result.added, enabled: result.enabled, persisted: result.changed };
     this.log.info(`Added/enabled ${result.added.length + result.enabled.length} Home Connect device(s) from mDNS discovery. Refresh admin page to see changes.`);
 
-    if (connectNewDevices) await this.prepareAndConnectConfiguredDevices([...result.added, ...result.enabled].map(device => device.haId));
-    return { added: result.added, enabled: result.enabled };
+    if (connectNewDevices && !this.unloaded) await this.prepareAndConnectConfiguredDevices([...result.added, ...result.enabled].map(device => device.haId));
+    return { added: result.added, enabled: result.enabled, persisted: result.changed };
   }
 
   private async writeAutoAddedDeviceStates(added: DiscoveryDeviceAdded[], enabled: DiscoveryDeviceEnabled[]): Promise<void> {
@@ -366,13 +403,17 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         lastOptionContextProgramRaw: undefined,
       };
 
+      if (this.unloaded) return;
       this.devices.set(profile.haId, device);
       await this.prepareDeviceObjects(device);
+      if (this.unloaded) return;
       await this.connectDevice(device);
+      if (this.unloaded) return;
     }
   }
 
   private async persistNativeConfig(): Promise<void> {
+    if (this.unloaded) return;
     const instanceObjectId = `system.adapter.${this.namespace}`;
     const instanceObject = await this.getForeignObjectAsync(instanceObjectId);
     if (!instanceObject || instanceObject.type !== "instance") {
@@ -380,6 +421,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       return;
     }
     const instanceNative = (instanceObject.native ?? {}) as Record<string, unknown>;
+    if (this.unloaded) return;
     await this.setForeignObjectAsync(instanceObjectId, {
       ...instanceObject,
       type: "instance",
@@ -392,6 +434,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async prepareDeviceObjects(device: RunningDevice): Promise<void> {
+    if (this.unloaded) return;
     const { baseId, profile, config } = device;
     const deviceName = this.deviceDisplayName(profile, config);
 
@@ -405,7 +448,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       native: { haId: profile.haId, type: profile.type, brand: profile.brand, vib: profile.vib, mac: profile.mac, connectionType: profile.connectionType, profileFile: profile.profileFile, host: config.host },
     });
 
+    if (this.unloaded) return;
     await this.cleanupLegacyDeviceFolders(device);
+    if (this.unloaded) return;
 
     await this.ensureChannel(`${baseId}.general`, "General Information");
     await this.ensureStateObject(`${baseId}.general.connected`, "Connected", false, "indicator.connected");
@@ -444,7 +489,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     this.registerWritableState(device, `${baseId}.settings.PowerState`, POWER_STATE_UID_NUMBER, "BSH.Common.Setting.PowerState", "value");
 
     await this.prepareCommandObjects(device);
+    if (this.unloaded) return;
     await this.prepareStartProgramObjects(device);
+    if (this.unloaded) return;
     await this.updateProgramList(device);
   }
 
@@ -582,11 +629,17 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
     try {
       await client.connect();
+      if (this.unloaded) {
+        await client.close().catch(closeError => this.log.debug(`Close after unload failed: ${String(closeError)}`));
+        return;
+      }
       await this.setDeviceConnectionState(device, true);
       this.log.info(`${device.profile.haId}: connected`);
+      if (this.unloaded) return;
       await client.readInitialValues();
     } catch (error) {
       await client.close().catch(closeError => this.log.debug(`Close after failed connect failed: ${String(closeError)}`));
+      if (this.unloaded) return;
       await this.setDeviceConnectionState(device, false, error);
       this.logConnectionFailure(device, error);
       this.scheduleReconnect(device, error instanceof Error ? error : new Error(String(error)));
@@ -594,16 +647,19 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async onStateChange(id: string, state: ioBroker.State | null | undefined): Promise<void> {
-    if (!state || state.ack) return;
+    if (this.unloaded || !state || state.ack) return;
     const relativeId = id.startsWith(`${this.namespace}.`) ? id.slice(this.namespace.length + 1) : id;
     if (relativeId === "discovery.scanNow") {
       if (this.currentConfig.enableMdnsDiscovery === true) {
         const discoveryResult = await this.runMdnsDiscoveryScan();
+        if (this.unloaded) return;
         if (this.currentConfig.autoAddDiscoveredDevices === true) {
           await this.addOrEnableConfiguredDevicesFromDiscovery(discoveryResult.matched, true);
+          if (this.unloaded) return;
         }
         if (this.currentConfig.autoUpdateDiscoveredHosts === true) {
           await this.updateConfiguredHostsFromDiscovery(discoveryResult.matched, true);
+          if (this.unloaded) return;
         }
       } else {
         this.log.warn("mDNS discovery scan requested but enableMdnsDiscovery is false");
@@ -854,15 +910,26 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private scheduleReconnect(device: RunningDevice, error?: Error): void {
     if (this.unloaded || device.reconnecting) return;
-    if (error) void this.setState(`${device.baseId}.info.lastError`, error.message, true);
+    if (error) void this.setState(`${device.baseId}.info.lastError`, error.message, true).catch(setStateError => {
+      if (!this.unloaded) this.log.debug(`${device.profile.haId}: writing reconnect error state failed: ${String(setStateError)}`);
+    });
     device.reconnecting = true;
-    void this.setState(`${device.baseId}.info.reconnecting`, true, true);
-    void this.updateGlobalConnectionState();
+    void this.setState(`${device.baseId}.info.reconnecting`, true, true).catch(setStateError => {
+      if (!this.unloaded) this.log.debug(`${device.profile.haId}: writing reconnect state failed: ${String(setStateError)}`);
+    });
+    void this.updateGlobalConnectionState().catch(setStateError => {
+      if (!this.unloaded) this.log.debug(`Updating global connection state failed: ${String(setStateError)}`);
+    });
     const seconds = Math.max(5, Number(this.currentConfig.reconnectInterval ?? 30));
     device.reconnectTimer = setTimeout(() => {
+      if (this.unloaded) return;
       device.reconnecting = false;
-      void this.setState(`${device.baseId}.info.reconnecting`, false, true);
-      void this.connectDevice(device);
+      void this.setState(`${device.baseId}.info.reconnecting`, false, true).catch(setStateError => {
+        if (!this.unloaded) this.log.debug(`${device.profile.haId}: clearing reconnect state failed: ${String(setStateError)}`);
+      });
+      void this.connectDevice(device).catch(connectError => {
+        if (!this.unloaded) this.log.warn(`${device.profile.haId}: reconnect failed: ${String(connectError)}`);
+      });
     }, seconds * 1000);
   }
 

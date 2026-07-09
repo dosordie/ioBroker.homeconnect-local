@@ -23,6 +23,7 @@ import { DiscoveredHomeConnectDevice, DiscoveryProfileMatch, matchDiscoveredDevi
 import { DiscoveryDeviceAdded, DiscoveryDeviceEnabled, DiscoveryHostUpdate, addOrEnableConfiguredDevicesFromDiscovery, updateConfiguredDeviceHostsFromDiscovery } from "./lib/discoveryConfigUpdate";
 import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/reconnectPolicy";
 import { RunningDevice, WritableState } from "./lib/runtimeTypes";
+import { evaluateStartAvailability, StartAvailability } from "./lib/startAvailability";
 import { StateMapper } from "./lib/stateMapper";
 import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
 import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
@@ -143,8 +144,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         profile,
         mapper: new StateMapper(profile),
         reconnecting: false,
+        connected: false,
         reconnectFailures: 0,
         writableUids: new Set<string>(),
+        readOnlyUids: new Set<string>(),
         blockedCommands: [],
         stateValuesByFeature: new Map<string, ioBroker.StateValue>(),
         rawValuesByFeature: new Map<string, unknown>(),
@@ -392,8 +395,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         profile,
         mapper: new StateMapper(profile),
         reconnecting: false,
+        connected: false,
         reconnectFailures: 0,
         writableUids: new Set<string>(),
+        readOnlyUids: new Set<string>(),
         blockedCommands: [],
         stateValuesByFeature: new Map<string, ioBroker.StateValue>(),
         rawValuesByFeature: new Map<string, unknown>(),
@@ -481,6 +486,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.ensureChannel(`${baseId}.${channel}`, channel);
     }
     await ensureDiagnosticStates(this, device);
+    await this.ensureStartAvailabilityStates(device);
     await this.ensureProgramStates(device);
     await this.ensureEventSummaryStates(device);
     await this.prepareRootProgramAliasObjects(device);
@@ -522,6 +528,28 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       this.log.info(`${device.profile.haId}: deleted obsolete object folder ${id}`);
     } catch (error) {
       this.log.warn(`${device.profile.haId}: deleting obsolete object folder ${id} failed: ${String(error)}`);
+    }
+  }
+
+  private async ensureStartAvailabilityStates(device: RunningDevice): Promise<void> {
+    await this.ensureStateObject(`${device.baseId}.status.canStart`, "Can start selected program", false, "indicator");
+    await this.ensureStateObject(`${device.baseId}.status.startBlockedReason`, "Start blocked reason", "unknown", "text");
+    await this.ensureStateObject(`${device.baseId}.status.startBlockedReason_de`, "Start blocked reason (German)", "unbekannt", "text");
+    await this.updateStartAvailability(device);
+  }
+
+  private async updateStartAvailability(device: RunningDevice): Promise<StartAvailability> {
+    const availability = evaluateStartAvailability(device, device.connected);
+    await this.setState(`${device.baseId}.status.canStart`, availability.canStart, true);
+    await this.setState(`${device.baseId}.status.startBlockedReason`, availability.reason, true);
+    await this.setState(`${device.baseId}.status.startBlockedReason_de`, availability.reasonDe, true);
+    return availability;
+  }
+
+  private async warnIfStartUnavailable(device: RunningDevice): Promise<void> {
+    const availability = await this.updateStartAvailability(device);
+    if (!availability.canStart) {
+      this.log.warn(`${device.profile.haId}: cannot start, startBlockedReason=${availability.reason} (${availability.reasonDe})`);
     }
   }
 
@@ -685,11 +713,14 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       }
 
       if (writableState.kind === "startProgramWithOptions") {
+        await this.warnIfStartUnavailable(device);
         await this.writeStartProgram(device, rawValue, await this.startOptionValuesFromState(device, rawValue));
       } else if (writableState.kind === "startProgram") {
+        await this.warnIfStartUnavailable(device);
         this.warnIfSelectedProgramNotSelectAndStart(device, rawValue);
         await this.writeStartProgram(device, rawValue, this.buildAutomaticStartOptionValues(device, rawValue));
       } else if (writableState.kind === "startProgramName" || writableState.featureName === ACTIVE_PROGRAM_FEATURE) {
+        await this.warnIfStartUnavailable(device);
         this.warnIfDirectProgramNotSelectAndStart(device, rawValue);
         await this.selectProgramBeforeDirectStartIfNeeded(device, rawValue);
         await this.writeStartProgram(device, rawValue, await this.startOptionValuesFromState(device, rawValue));
@@ -941,6 +972,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async setDeviceConnectionState(device: RunningDevice, connected: boolean, error?: unknown): Promise<void> {
+    device.connected = connected;
     await this.setState(`${device.baseId}.info.connected`, connected, true);
     await this.setState(`${device.baseId}.general.connected`, connected, true);
     await this.setState(`${device.baseId}.info.reconnecting`, false, true);
@@ -953,6 +985,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.setState(`${device.baseId}.info.lastError`, error instanceof Error ? error.message : String(error), true);
     }
     await this.updateGlobalConnectionState();
+    await this.updateStartAvailability(device);
   }
 
   private async handleDeviceMessage(device: RunningDevice, message: HcMessage): Promise<void> {
@@ -976,8 +1009,13 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       const targetFeature = device.profile.featureMapping.featuresByUid[uid];
       const execution = typeof value.execution === "string" ? value.execution : undefined;
       if (execution && targetFeature?.includes(".Program.")) device.programExecutionByFeature.set(targetFeature, execution);
-      if (isWritableAccess(access)) device.writableUids.add(uid);
-      else if (access === "read" || access === "none") device.writableUids.delete(uid);
+      if (isWritableAccess(access)) {
+        device.writableUids.add(uid);
+        device.readOnlyUids.delete(uid);
+      } else if (access === "read" || access === "none") {
+        device.writableUids.delete(uid);
+        device.readOnlyUids.add(uid);
+      }
       const target = device.mapper.toStateTarget({ uid, value: "" });
       if (!target) continue;
       const stateId = `${device.baseId}.${target.id}`;
@@ -990,6 +1028,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       if (writable) this.registerWritableState(device, stateId, this.uidStringToNumber(uid) ?? Number(uid), target.name, "value");
       if (target.name === SELECTED_PROGRAM_FEATURE || target.name === ACTIVE_PROGRAM_FEATURE) await this.prepareRootProgramAliasObjects(device);
     }
+    await this.updateStartAvailability(device);
   }
 
   private async writeRoValue(device: RunningDevice, value: RoValue): Promise<void> {
@@ -1011,6 +1050,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     if (target.category === "events") device.eventValuesByFeature.set(target.name, normalizedValue);
     this.updateProgramOptionContextMarker(device, target);
     await this.writeRootProgramAliasValues(device, target, normalizedValue);
+    await this.updateStartAvailability(device);
     if (isWritable) {
       const numericUid = this.uidStringToNumber(target.uid);
       if (numericUid !== undefined) this.registerWritableState(device, stateId, numericUid, target.name, "value");
@@ -1053,6 +1093,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.setState(`${device.baseId}.program.RootActiveProgram`, value, true);
       await this.setState(`${device.baseId}.program.activeProgramName`, this.programDisplayName(device, String(value)), true);
     }
+    if (target.name === SELECTED_PROGRAM_FEATURE || target.name === ACTIVE_PROGRAM_FEATURE) await this.updateStartAvailability(device);
   }
 
   private async updateProgramList(device: RunningDevice): Promise<void> {

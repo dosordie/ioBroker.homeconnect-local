@@ -10,8 +10,10 @@ export interface RunningDevice {
   client?: HomeConnectClient;
   reconnectTimer?: NodeJS.Timeout;
   reconnecting: boolean;
+  connected: boolean;
   reconnectFailures: number;
   writableUids: Set<string>;
+  readOnlyUids: Set<string>;
   blockedCommands: string[];
   stateValuesByFeature: Map<string, ioBroker.StateValue>;
   rawValuesByFeature: Map<string, unknown>;

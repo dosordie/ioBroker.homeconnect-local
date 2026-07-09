@@ -304,3 +304,87 @@ test("discovery auto-add keeps existing enabled devices enabled and does not dup
   assert.equal(result.added.length, 0);
   assert.equal(result.enabled.length, 0);
 });
+
+const { evaluateStartAvailability } = require("../build/lib/startAvailability");
+
+function startAvailabilityDevice(type, values = {}, rawValues = {}, featuresByUid = {}) {
+  const device = {
+    baseId: "device",
+    config: { type },
+    profile: {
+      haId: "ha-start",
+      type,
+      connectionType: "TLS",
+      key: "key",
+      featureMapping: {
+        featuresByUid: { "0100": "BSH.Common.Root.ActiveProgram", ...featuresByUid },
+        enumTypeByUid: {},
+        enumValuesByType: {},
+        programOptionsByUid: {},
+      },
+    },
+    mapper: {},
+    reconnecting: false,
+    connected: true,
+    reconnectFailures: 0,
+    writableUids: new Set(["0100"]),
+    readOnlyUids: new Set(),
+    blockedCommands: [],
+    stateValuesByFeature: new Map(Object.entries(values)),
+    rawValuesByFeature: new Map(Object.entries(rawValues)),
+    eventValuesByFeature: new Map(),
+    programExecutionByFeature: new Map(),
+  };
+  return device;
+}
+
+function readyValues(extra = {}) {
+  return {
+    "BSH.Common.Root.SelectedProgram": 123,
+    "BSH.Common.Status.DoorState": "Closed",
+    "BSH.Common.Status.OperationState": "Ready",
+    "BSH.Common.Status.RemoteControlStartAllowed": true,
+    "BSH.Common.Setting.PowerState": "On",
+    ...extra,
+  };
+}
+
+test("start availability reports disconnected appliances", () => {
+  assert.equal(evaluateStartAvailability(startAvailabilityDevice("Washer", readyValues()), false).reason, "not_connected");
+});
+
+test("start availability blocks open and ajar doors but not closed or locked doors", () => {
+  assert.equal(evaluateStartAvailability(startAvailabilityDevice("Washer", readyValues({ "BSH.Common.Status.DoorState": "Open" })), true).reason, "door_open");
+  assert.equal(evaluateStartAvailability(startAvailabilityDevice("Washer", readyValues({ "BSH.Common.Status.DoorState": "Ajar" })), true).reason, "door_open");
+  assert.notEqual(evaluateStartAvailability(startAvailabilityDevice("Washer", readyValues({ "BSH.Common.Status.DoorState": "Closed" })), true).reason, "door_open");
+  assert.notEqual(evaluateStartAvailability(startAvailabilityDevice("Washer", readyValues({ "BSH.Common.Status.DoorState": "Locked" })), true).reason, "door_open");
+});
+
+test("start availability blocks running operation state", () => {
+  assert.equal(evaluateStartAvailability(startAvailabilityDevice("Dryer", readyValues({ "BSH.Common.Status.OperationState": "Run" })), true).reason, "already_running");
+  assert.equal(evaluateStartAvailability(startAvailabilityDevice("Dryer", readyValues({ "BSH.Common.Status.OperationState": "Running" })), true).reason, "already_running");
+});
+
+test("start availability requires a selected program", () => {
+  const values = readyValues({ "BSH.Common.Root.SelectedProgram": "" });
+  assert.equal(evaluateStartAvailability(startAvailabilityDevice("Dishwasher", values), true).reason, "no_selected_program");
+});
+
+test("start availability checks remote-start allowance for dishwasher washer and dryer", () => {
+  for (const type of ["Dishwasher", "Washer", "Dryer"]) {
+    assert.equal(evaluateStartAvailability(startAvailabilityDevice(type, readyValues({ "BSH.Common.Status.RemoteControlStartAllowed": false })), true).reason, "remote_start_not_allowed");
+  }
+});
+
+test("start availability checks power-on for washer and dryer but not dishwasher", () => {
+  assert.equal(evaluateStartAvailability(startAvailabilityDevice("Washer", readyValues({ "BSH.Common.Setting.PowerState": "MainsOff" })), true).reason, "power_off");
+  assert.equal(evaluateStartAvailability(startAvailabilityDevice("Dryer", readyValues({ "BSH.Common.Setting.PowerState": "Off" })), true).reason, "power_off");
+  const dishwasherAvailability = evaluateStartAvailability(startAvailabilityDevice("Dishwasher", readyValues({ "BSH.Common.Setting.PowerState": "Off" })), true);
+  assert.equal(dishwasherAvailability.reason, "ready");
+  assert.equal(dishwasherAvailability.canStart, true);
+});
+
+test("start availability reports ready when all known start conditions pass", () => {
+  const availability = evaluateStartAvailability(startAvailabilityDevice("Washer", readyValues()), true);
+  assert.deepEqual(availability, { canStart: true, reason: "ready", reasonDe: "startbereit" });
+});

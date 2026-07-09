@@ -418,3 +418,19 @@ test("start availability handles raw numeric PowerState constants", () => {
   assert.equal(evaluateStartAvailability(offDevice, true).reason, "power_off");
   assert.notEqual(evaluateStartAvailability(onDevice, true).reason, "power_off");
 });
+
+const { mergeStartOptionValues, shouldSendAutomaticStartOption } = require("../build/lib/startOptions");
+
+test("start option merge keeps explicit values before automatic values", () => {
+  assert.deepEqual(
+    mergeStartOptionValues([{ uid: 1, value: "explicit" }], [{ uid: 1, value: "automatic" }, { uid: 2, value: true }]),
+    [{ uid: 1, value: "explicit" }, { uid: 2, value: true }],
+  );
+});
+
+test("automatic start options skip StartInRelative zero false values and defaults", () => {
+  assert.equal(shouldSendAutomaticStartOption("BSH.Common.Option.StartInRelative", 0), false);
+  assert.equal(shouldSendAutomaticStartOption("LaundryCare.Washer.Option.SpeedPerfect", false), false);
+  assert.equal(shouldSendAutomaticStartOption("LaundryCare.Washer.Option.Temperature", 40, { refUID: "1", default: 40 }), false);
+  assert.equal(shouldSendAutomaticStartOption("LaundryCare.Washer.Option.Temperature", 60, { refUID: "1", default: 40 }), true);
+});

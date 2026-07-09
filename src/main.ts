@@ -24,6 +24,7 @@ import { DiscoveryDeviceAdded, DiscoveryDeviceEnabled, DiscoveryHostUpdate, addO
 import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/reconnectPolicy";
 import { RunningDevice, WritableState } from "./lib/runtimeTypes";
 import { evaluateStartAvailability, StartAvailability } from "./lib/startAvailability";
+import { mergeStartOptionValues, shouldSendAutomaticStartOption } from "./lib/startOptions";
 import { StateMapper } from "./lib/stateMapper";
 import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
 import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
@@ -788,7 +789,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private async startOptionValuesFromState(device: RunningDevice, programRaw: unknown): Promise<Array<{ uid: number; value: unknown }>> {
     const optionsState = await this.getStateAsync(`${device.baseId}.program.startOptionsJson`);
     const explicitOptions = this.buildStartOptionValues(device, parseJsonObject(optionsState?.val));
-    return this.mergeStartOptionValues(explicitOptions, this.buildAutomaticStartOptionValues(device, programRaw));
+    return mergeStartOptionValues(explicitOptions, this.buildAutomaticStartOptionValues(device, programRaw));
   }
 
   private async selectProgramBeforeDirectStartIfNeeded(device: RunningDevice, programRaw: unknown): Promise<void> {
@@ -860,6 +861,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     const programUidKey = Number.isFinite(programUid) ? normalizeUid(programUid) : undefined;
     const programOptions = programUidKey ? device.profile.featureMapping.programOptionsByUid[programUidKey] : undefined;
     const result: Array<{ uid: number; value: unknown }> = [];
+    const skippedDefaults: string[] = [];
 
     if (Number.isFinite(programUid) && device.lastOptionContextProgramRaw !== programUid) {
       this.log.debug(`${device.profile.haId}: start options for ${programUid}${programKey ? ` (${programKey})` : ""}: none; automatic options source: unsafe context (selected=${JSON.stringify(device.lastSelectedProgramRaw)}, optionContext=${JSON.stringify(device.lastOptionContextProgramRaw)})`);
@@ -885,20 +887,22 @@ class HomeconnectLocalAdapter extends utils.Adapter {
           : stateValue === undefined
             ? undefined
             : stateValueToRaw(device.profile, numericUid, stateValue);
-        if (rawValue !== undefined && rawValue !== null && rawValue !== "") result.push({ uid: numericUid, value: rawValue });
+        if (rawValue === undefined || rawValue === null || rawValue === "") continue;
+        if (!shouldSendAutomaticStartOption(featureName, rawValue, programOption)) {
+          skippedDefaults.push(`${numericUid}=${JSON.stringify(rawValue)}`);
+          continue;
+        }
+        result.push({ uid: numericUid, value: rawValue });
       }
     }
 
     const optionList = result.map(option => `${option.uid}=${JSON.stringify(option.value)}`).join(", ") || "none";
+    const skippedList = skippedDefaults.join(", ") || "none";
     const source = programOptions ? "program-specific" : "unknown (empty)";
-    this.log.debug(`${device.profile.haId}: start options for ${programUid}${programKey ? ` (${programKey})` : ""}: ${optionList}; automatic options source: ${source}`);
+    this.log.debug(`${device.profile.haId}: start options for ${programUid}${programKey ? ` (${programKey})` : ""}: automatic sent ${optionList}; automatic skipped defaults ${skippedList}; automatic options source: ${source}`);
     return result;
   }
 
-  private mergeStartOptionValues(explicitOptions: Array<{ uid: number; value: unknown }>, automaticOptions: Array<{ uid: number; value: unknown }>): Array<{ uid: number; value: unknown }> {
-    const explicitUids = new Set(explicitOptions.map(option => option.uid));
-    return [...explicitOptions, ...automaticOptions.filter(option => !explicitUids.has(option.uid))];
-  }
 
   private warnIfSelectedProgramNotSelectAndStart(device: RunningDevice, programRaw: unknown): void {
     this.warnIfProgramNotSelectAndStart(device, programRaw, "starting selected program");
@@ -1012,9 +1016,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       if (isWritableAccess(access)) {
         device.writableUids.add(uid);
         device.readOnlyUids.delete(uid);
-      } else if (access === "read" || access === "none") {
+      } else if (access) {
         device.writableUids.delete(uid);
-        device.readOnlyUids.add(uid);
+        if (access === "read" || access === "none") device.readOnlyUids.add(uid);
+        else device.readOnlyUids.delete(uid);
       }
       const target = device.mapper.toStateTarget({ uid, value: "" });
       if (!target) continue;

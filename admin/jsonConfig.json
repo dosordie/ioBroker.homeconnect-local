@@ -9,7 +9,7 @@
         "_profileUploadHint": {
           "type": "infoBox",
           "title": "Profile ZIP files",
-          "text": "Recommended: upload Home Connect profile ZIP files in the ioBroker Files tab to 0_userdata.0/homeconnect-lokal-zip. The matching container path is /opt/iobroker/iobroker-data/files/0_userdata.0/homeconnect-lokal-zip and is used as the default profile directory. Restart this adapter instance after uploading new ZIP files so the profiles are scanned again.",
+          "text": "Place the HomeConnect Local HASS ZIP files in the ioBroker file area, for example /opt/iobroker/iobroker-data/files/0_userdata.0/. The adapter scans this folder for matching profile ZIP files. Restart the adapter instance or trigger a scan after uploading new ZIP files.",
           "boxType": "info",
           "sm": 12,
           "md": 12
@@ -17,7 +17,7 @@
         "profilePath": {
           "type": "text",
           "label": "Profile directory path",
-          "help": "Absolute container path to a directory containing Home Connect profile ZIP files. Default: /opt/iobroker/iobroker-data/files/0_userdata.0/homeconnect-lokal-zip. A single ZIP or extracted profile directory is still supported. Restart the adapter after changing profiles.",
+          "help": "Absolute container path to a directory containing Home Connect profile ZIP files. Default: /opt/iobroker/iobroker-data/files/0_userdata.0/. A single ZIP or extracted profile directory is still supported. Restart the adapter instance or trigger a scan after uploading new ZIP files.",
           "sm": 12,
           "md": 12
         },
@@ -27,6 +27,35 @@
           "help": "New profiles are added as disabled device suggestions. Existing enabled, host and haId values are preserved.",
           "sm": 12,
           "md": 12
+        },
+        "enableMdnsDiscovery": {
+          "type": "checkbox",
+          "label": "Enable mDNS discovery",
+          "help": "Searches the local network for Home Connect appliances via _homeconnect._tcp.local. Depending on the enabled options, discovery can write discovery states, update hosts, and enable or add uniquely discovered appliances.",
+          "sm": 12,
+          "md": 6
+        },
+        "mdnsDiscoveryTimeout": {
+          "type": "number",
+          "label": "mDNS discovery timeout in seconds",
+          "help": "How long each Home Connect mDNS discovery scan listens for responses.",
+          "min": 1,
+          "sm": 12,
+          "md": 6
+        },
+        "autoUpdateDiscoveredHosts": {
+          "type": "checkbox",
+          "label": "Update hosts from discovered appliances",
+          "help": "Automatically updates the host/IP address of existing configured appliances from safe mDNS matches.",
+          "sm": 12,
+          "md": 6
+        },
+        "autoAddDiscoveredDevices": {
+          "type": "checkbox",
+          "label": "Automatically enable/add discovered appliances",
+          "help": "Automatically enables or adds uniquely discovered appliances to the device table when a matching profile ZIP is available.",
+          "sm": 12,
+          "md": 6
         },
         "appName": {
           "type": "text",
@@ -49,7 +78,14 @@
         },
         "debugRaw": {
           "type": "checkbox",
-          "label": "Create raw uid states and log received /ro values",
+          "label": "Log received raw /ro values",
+          "sm": 12,
+          "md": 6
+        },
+        "enableRawStates": {
+          "type": "checkbox",
+          "label": "Create raw UID states",
+          "help": "Creates debug states raw.uid_<uid> with raw Home Connect values.",
           "sm": 12,
           "md": 6
         },

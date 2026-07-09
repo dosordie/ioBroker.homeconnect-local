@@ -11,9 +11,16 @@ export interface RunningDevice {
   reconnectTimer?: NodeJS.Timeout;
   reconnecting: boolean;
   reconnectFailures: number;
+  connected: boolean;
   writableUids: Set<string>;
+  readOnlyUids: Set<string>;
   blockedCommands: string[];
   stateValuesByFeature: Map<string, ioBroker.StateValue>;
+  rawValuesByFeature: Map<string, unknown>;
+  eventValuesByFeature: Map<string, ioBroker.StateValue>;
+  programExecutionByFeature: Map<string, string>;
+  lastSelectedProgramRaw?: unknown;
+  lastOptionContextProgramRaw?: unknown;
 }
 
 export type WritableStateKind = "value" | "command" | "startProgram" | "startProgramWithOptions" | "startProgramName";

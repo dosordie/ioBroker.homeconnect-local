@@ -1,5 +1,4 @@
 import { dataArray, firstRecord, recordValue } from "./dataHelpers";
-import { sanitizeObjectId } from "./ids";
 import { ensureStateObject, setBooleanState, setNumberState, setTextState } from "./objectHelpers";
 import { RunningDevice } from "./runtimeTypes";
 
@@ -12,7 +11,6 @@ export async function ensureDiagnosticStates(adapter: ioBroker.Adapter, device: 
   await ensureStateObject(adapter, `${baseId}.network.configured`, "Configured", false, "indicator");
   await ensureStateObject(adapter, `${baseId}.network.primary`, "Primary interface", false, "indicator");
   await ensureStateObject(adapter, `${baseId}.network.ipv4PrefixSize`, "IPv4 prefix size", 0, "value");
-  await ensureStateObject(adapter, `${baseId}.services.json`, "Raw service versions", "", "json");
   await ensureStateObject(adapter, `${baseId}.registeredDevices.json`, "Raw registered apps/devices", "", "json");
   await ensureStateObject(adapter, `${baseId}.registeredDevices.count`, "Registered apps/devices count", 0, "value");
   await ensureStateObject(adapter, `${baseId}.registeredDevices.connectedCount`, "Connected registered apps/devices count", 0, "value");
@@ -47,20 +45,6 @@ export async function writeNetworkInfo(adapter: ioBroker.Adapter, device: Runnin
   await setTextState(adapter, `${device.baseId}.network.ipv4Gateway`, ipv4?.gateway);
   await setTextState(adapter, `${device.baseId}.network.ipv4DnsServer`, ipv4?.dnsServer);
   await setTextState(adapter, `${device.baseId}.network.ipv6Address`, ipv6?.ipAddress);
-}
-
-export async function writeServiceInfo(adapter: ioBroker.Adapter, device: RunningDevice, data: unknown): Promise<void> {
-  const services: Record<string, number> = {};
-  for (const item of dataArray(data)) {
-    const service = typeof item.service === "string" ? item.service : undefined;
-    const version = Number(item.version);
-    if (!service || !Number.isFinite(version)) continue;
-    services[service] = version;
-    const id = `${device.baseId}.services.${sanitizeObjectId(service)}`;
-    await ensureStateObject(adapter, id, `Service ${service} version`, 0, "value");
-    await adapter.setState(id, version, true);
-  }
-  await adapter.setState(`${device.baseId}.services.json`, JSON.stringify(services), true);
 }
 
 export async function writeRegisteredDevices(adapter: ioBroker.Adapter, device: RunningDevice, data: unknown): Promise<void> {

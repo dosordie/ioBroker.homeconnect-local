@@ -1,9 +1,7 @@
 {
   "Main settings": "Main settings",
   "Profile ZIP files": "Profile ZIP files",
-  "Recommended now: copy Home Connect profile ZIP files into the configured container profile directory and set that path below. The ioBroker Files tab can upload files into adapter file storage; direct scanning from that storage is planned for a later version.": "Recommended now: copy Home Connect profile ZIP files into the configured container profile directory and set that path below. The ioBroker Files tab can upload files into adapter file storage; direct scanning from that storage is planned for a later version.",
   "Profile directory path": "Profile directory path",
-  "Absolute container path to a directory containing Home Connect profile ZIP files. A single ZIP or extracted profile directory is still supported.": "Absolute container path to a directory containing Home Connect profile ZIP files. A single ZIP or extracted profile directory is still supported.",
   "Automatically add scanned profiles to the device table": "Automatically add scanned profiles to the device table",
   "New profiles are added as disabled device suggestions. Existing enabled, host and haId values are preserved.": "New profiles are added as disabled device suggestions. Existing enabled, host and haId values are preserved.",
   "App name": "App name",
@@ -20,5 +18,18 @@
   "Brand": "Brand",
   "VIB": "VIB",
   "Connection": "Connection",
-  "Profile file": "Profile file"
+  "Profile file": "Profile file",
+  "Create raw UID states": "Create raw UID states",
+  "Creates debug states raw.uid_<uid> with raw Home Connect values.": "Creates debug states raw.uid_<uid> with raw Home Connect values.",
+  "Log received raw /ro values": "Log received raw /ro values",
+  "Enable mDNS discovery": "Enable mDNS discovery",
+  "mDNS discovery timeout in seconds": "mDNS discovery timeout in seconds",
+  "How long each Home Connect mDNS discovery scan listens for responses.": "How long each Home Connect mDNS discovery scan listens for responses.",
+  "Update hosts from discovered appliances": "Update hosts from discovered appliances",
+  "Automatically updates the host/IP address of existing configured appliances from safe mDNS matches.": "Automatically updates the host/IP address of existing configured appliances from safe mDNS matches.",
+  "Automatically enable/add discovered appliances": "Automatically enable/add discovered appliances",
+  "Automatically enables or adds uniquely discovered appliances to the device table when a matching profile ZIP is available.": "Automatically enables or adds uniquely discovered appliances to the device table when a matching profile ZIP is available.",
+  "Place the HomeConnect Local HASS ZIP files in the ioBroker file area, for example /opt/iobroker/iobroker-data/files/0_userdata.0/. The adapter scans this folder for matching profile ZIP files. Restart the adapter instance or trigger a scan after uploading new ZIP files.": "Place the HomeConnect Local HASS ZIP files in the ioBroker file area, for example /opt/iobroker/iobroker-data/files/0_userdata.0/. The adapter scans this folder for matching profile ZIP files. Restart the adapter instance or trigger a scan after uploading new ZIP files.",
+  "Searches the local network for Home Connect appliances via _homeconnect._tcp.local. Depending on the enabled options, discovery can write discovery states, update hosts, and enable or add uniquely discovered appliances.": "Searches the local network for Home Connect appliances via _homeconnect._tcp.local. Depending on the enabled options, discovery can write discovery states, update hosts, and enable or add uniquely discovered appliances.",
+  "Absolute container path to a directory containing Home Connect profile ZIP files. Default: /opt/iobroker/iobroker-data/files/0_userdata.0/. A single ZIP or extracted profile directory is still supported. Restart the adapter instance or trigger a scan after uploading new ZIP files.": "Absolute container path to a directory containing Home Connect profile ZIP files. Default: /opt/iobroker/iobroker-data/files/0_userdata.0/. A single ZIP or extracted profile directory is still supported. Restart the adapter instance or trigger a scan after uploading new ZIP files."
 }

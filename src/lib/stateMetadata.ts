@@ -14,6 +14,7 @@ const KNOWN_FEATURE_METADATA: Array<{ pattern: RegExp; metadata: StateCommonMeta
   { pattern: /Temperature/i, metadata: { unit: "°C" } },
   { pattern: /(?:^|\.)Power(?:\.|$)/i, metadata: { unit: "W" } },
   { pattern: /Energy/i, metadata: { unit: "kWh" } },
+  { pattern: /(?:WaterForecast|EnergyForecast)$/i, metadata: { unit: "%" } },
 ];
 
 export function metadataForFeature(featureName: string, uid: string, profile: ApplianceProfile): StateCommonMetadata {

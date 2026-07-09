@@ -2,6 +2,7 @@ import { runHomeConnectHandshake } from "./clientHandshake";
 import { extractInitialMessageId, parseServiceVersions, serviceKeyForResource } from "./clientProtocol";
 import { dumpMessage, parseMessage } from "./message";
 import { PendingResponses } from "./pendingResponses";
+import { describeResponseCode } from "./responseCodes";
 import { createHomeConnectSocket } from "./socketFactory";
 import { HomeConnectSocketLike } from "./socket";
 import { ConnectionType, HcMessage } from "./types";
@@ -122,6 +123,28 @@ export class HomeConnectClient {
     }, 20000);
   }
 
+  public async selectProgram(programUid: number, options: Array<{ uid: number; value: unknown }> = []): Promise<HcMessage> {
+    return this.sendSync({
+      resource: "/ro/selectedProgram",
+      action: "POST",
+      data: [{
+        program: programUid,
+        options,
+      }],
+    }, 20000);
+  }
+
+  public async startProgram(programUid: number, options: Array<{ uid: number; value: unknown }> = []): Promise<HcMessage> {
+    return this.sendSync({
+      resource: "/ro/activeProgram",
+      action: "POST",
+      data: [{
+        program: programUid,
+        options,
+      }],
+    }, 20000);
+  }
+
   public async send(message: HcMessage): Promise<void> {
     const prepared = this.prepareMessage(message);
     const serialized = dumpMessage(prepared);
@@ -138,12 +161,13 @@ export class HomeConnectClient {
     const serialized = dumpMessage(prepared);
     this.log?.debug(`HC SEND ${serialized}`);
     const responsePromise = this.pendingResponses.create(prepared.msgID, prepared.resource, timeoutMs);
+    responsePromise.catch(() => undefined);
 
     await this.socket.send(serialized);
     const response = await responsePromise;
 
     if (response.code !== undefined && response.code !== 0) {
-      throw new Error(`Home Connect response code ${response.code} for ${response.resource}`);
+      throw new Error(`Home Connect response code ${response.code} (${describeResponseCode(response.code)}) for ${response.resource}`);
     }
 
     return response;

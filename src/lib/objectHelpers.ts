@@ -3,16 +3,41 @@ export async function ensureChannel(adapter: ioBroker.Adapter, id: string, name:
 }
 
 export async function ensureStateObject(adapter: ioBroker.Adapter, id: string, name: string, value: ioBroker.StateValue, role?: string, write = false, metadata: Partial<ioBroker.StateCommon> = {}): Promise<void> {
-  const type = typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string";
+  const valueType = typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string";
+  const type = write && valueType === "string" && hasNumericStateKeys(metadata.states) ? "mixed" : valueType;
   const desiredRole = role ?? (type === "boolean" ? "indicator" : "value");
   const sanitizedMetadata = sanitizeMetadataForType(metadata, type);
   const existing = await adapter.getObjectAsync(id);
-  const common: ioBroker.StateCommon = { ...(existing?.common as ioBroker.StateCommon | undefined), name, type, role: desiredRole, read: true, write, ...sanitizedMetadata };
+  const existingCommon = sanitizeMetadataForType((existing?.common as ioBroker.StateCommon | undefined) ?? {}, type);
+  const common: ioBroker.StateCommon = { ...existingCommon, name, type, role: desiredRole, read: true, write, ...sanitizedMetadata };
   if (!existing) {
     await adapter.setObjectNotExistsAsync(id, { type: "state", common, native: {} });
     return;
   }
-  if (existing.type !== "state" || existing.common?.type !== type || existing.common?.role !== desiredRole || existing.common?.write !== write || existing.common?.name !== name || commonChanged(existing.common as ioBroker.StateCommon | undefined, sanitizedMetadata)) {
+  if (existing.type !== "state" || existing.common?.type !== type || existing.common?.role !== desiredRole || existing.common?.write !== write || existing.common?.name !== name || commonChanged(existing.common as ioBroker.StateCommon | undefined, common)) {
+    await adapter.extendObjectAsync(id, { type: "state", common, native: existing.native ?? {} });
+  }
+}
+
+export async function ensureButtonStateObject(adapter: ioBroker.Adapter, id: string, name: string): Promise<void> {
+  const common = {
+    name,
+    type: "boolean",
+    role: "button",
+    read: true,
+    write: true,
+    def: false,
+    states: undefined,
+    min: undefined,
+    max: undefined,
+    step: undefined,
+  } as ioBroker.StateCommon;
+  const existing = await adapter.getObjectAsync(id);
+  if (!existing) {
+    await adapter.setObjectNotExistsAsync(id, { type: "state", common, native: {} });
+    return;
+  }
+  if (existing.type !== "state" || commonChanged(existing.common as ioBroker.StateCommon | undefined, common)) {
     await adapter.extendObjectAsync(id, { type: "state", common, native: existing.native ?? {} });
   }
 }
@@ -37,6 +62,14 @@ function sanitizeMetadataForType(metadata: Partial<ioBroker.StateCommon>, type: 
 
   const { min: _min, max: _max, step: _step, ...rest } = metadata;
   return rest;
+}
+
+function hasNumericStateKeys(states: ioBroker.StateCommon["states"] | undefined): boolean {
+  if (!states || typeof states !== "object") {
+    return false;
+  }
+
+  return Object.keys(states).some(key => key.trim() !== "" && Number.isFinite(Number(key)));
 }
 
 function commonChanged(existing: ioBroker.StateCommon | undefined, metadata: Partial<ioBroker.StateCommon>): boolean {

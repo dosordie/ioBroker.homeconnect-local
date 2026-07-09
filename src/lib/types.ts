@@ -33,6 +33,14 @@ export interface FeatureMapping {
   featuresByUid: Record<string, string>;
   enumTypeByUid: Record<string, string>;
   enumValuesByType: Record<string, Record<string, string>>;
+  programOptionsByUid: Record<string, ProgramOptionDescription[]>;
+}
+
+export interface ProgramOptionDescription {
+  refUID: string;
+  access?: string;
+  available?: boolean;
+  default?: unknown;
 }
 
 export interface ConfiguredDevice {
@@ -54,7 +62,12 @@ export interface AdapterNativeConfig {
   appId?: string;
   reconnectInterval?: number;
   debugRaw?: boolean;
+  enableRawStates?: boolean;
   autoAddProfiles?: boolean;
+  enableMdnsDiscovery?: boolean;
+  mdnsDiscoveryTimeout?: number;
+  autoUpdateDiscoveredHosts?: boolean;
+  autoAddDiscoveredDevices?: boolean;
   devices?: ConfiguredDevice[];
 }
 

@@ -844,3 +844,102 @@ test("effective power state resolves numeric raw PowerState through enum mapping
     isEffectivelyOn: false,
   });
 });
+
+function hobZoneDevice(entries, rawEntries = []) {
+  return {
+    stateValuesByFeature: new Map(entries),
+    rawValuesByFeature: new Map(rawEntries),
+  };
+}
+
+function hobFeature(zone, field) {
+  return `Cooking.Hob.Status.Zone.${zone}.${field}`;
+}
+
+test("hob active zone summary treats ActiveProgram with zero PowerLevel as active", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("120", "ActiveProgram"), 12289],
+    [hobFeature("120", "PowerLevel"), 0],
+  ]));
+  assert.equal(summary.activeZones.length, 1);
+  assert.equal(summary.activeZones[0].zone, "120");
+  assert.equal(summary.activeZones[0].activeProgram, 12289);
+  assert.equal(summary.activeZones[0].powerLevel, 0);
+});
+
+test("hob active zone summary treats positive PowerLevel as active", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([[hobFeature("340", "PowerLevel"), 5]]));
+  assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["340"]);
+});
+
+test("hob active zone summary treats State Active as active", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([[hobFeature("560", "State"), "Active"]]));
+  assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["560"]);
+});
+
+test("hob active zone summary treats active OperationState values as active", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  for (const operationState of ["Active", "Run", "Running", "On", 1]) {
+    const summary = evaluateHobZoneSummary(hobZoneDevice([[hobFeature("780", "OperationState"), operationState]]));
+    assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["780"]);
+  }
+});
+
+test("hob active zone summary can use raw numeric OperationState enum value", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice(
+    [[hobFeature("901", "OperationState"), "Unknown(1)"]],
+    [[hobFeature("901", "OperationState"), 1]],
+  ));
+  assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["901"]);
+});
+
+test("hob inactive zone states are not active", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const offSummary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("120", "State"), "Off"],
+    [hobFeature("120", "ActiveProgram"), 0],
+    [hobFeature("120", "PowerLevel"), 0],
+  ]));
+  const notSelectableSummary = evaluateHobZoneSummary(hobZoneDevice([[hobFeature("340", "State"), "NotSelectable"]]));
+  assert.equal(offSummary.activeZones.length, 0);
+  assert.equal(notSelectableSummary.activeZones.length, 0);
+});
+
+test("hob residual heat zones are not active but are reported separately", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("120", "State"), "ResidualHeat"],
+    [hobFeature("340", "State"), "ResiduelHeat"],
+  ]));
+  assert.equal(summary.activeZones.length, 0);
+  assert.deepEqual(summary.residualHeatZones.map(zone => zone.zone), ["120", "340"]);
+  assert.equal(summary.residualHeatZonesText, "120, 340");
+});
+
+test("hob active zone summary exposes boolean, JSON, and text friendly values", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const activeSummary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("340", "PowerLevel"), 3],
+    [hobFeature("120", "ActiveProgram"), 12289],
+    [hobFeature("120", "PowerLevel"), 0],
+  ]));
+  const inactiveSummary = evaluateHobZoneSummary(hobZoneDevice([[hobFeature("560", "State"), "Off"]]));
+  assert.equal(activeSummary.activeZones.length > 0, true);
+  assert.equal(activeSummary.activeZonesText, "120, 340");
+  assert.equal(JSON.parse(JSON.stringify(activeSummary.activeZones))[0].zone, "120");
+  assert.equal(inactiveSummary.activeZones.length > 0, false);
+  assert.equal(inactiveSummary.activeZonesText, "");
+});
+
+test("hob zone feature detection is generic and not UID based", () => {
+  const { isHobZoneFeature } = require("../build/lib/hobActiveZones");
+  assert.equal(isHobZoneFeature(hobFeature("120", "State")), true);
+  assert.equal(isHobZoneFeature(hobFeature("120", "OperationState")), true);
+  assert.equal(isHobZoneFeature(hobFeature("120", "ActiveProgram")), true);
+  assert.equal(isHobZoneFeature(hobFeature("120", "PowerLevel")), true);
+  assert.equal(isHobZoneFeature("Cooking.Hob.Status.Zone.120.Temperature"), false);
+});

@@ -30,6 +30,7 @@ import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoo
 import { mergeStartOptionValues, shouldSendAutomaticStartOption } from "./lib/startOptions";
 import { evaluateStartAvailability, StartAvailability } from "./lib/startAvailability";
 import { evaluateEffectivePowerState, POWER_STATE_FEATURE } from "./lib/effectivePowerState";
+import { evaluateHobZoneSummary, isHobZoneFeature } from "./lib/hobActiveZones";
 import { hasWritableProgramOption, isProgramOptionDescriptionWritable, isReadOnlyProgramOption, isWritableAccess, normalizedAccess } from "./lib/optionWriteability";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue, StateTarget } from "./lib/types";
 
@@ -503,6 +504,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
     await ensureDiagnosticStates(this, device);
     await this.ensureEffectivePowerStateObjects(device);
+    await this.ensureHobActiveZoneObjects(device);
     await this.ensureStartAvailabilityStates(device);
     await this.ensureProgramStates(device);
     await this.ensureEventSummaryStates(device);
@@ -560,6 +562,28 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.setState(`${device.baseId}.status.effectivePowerState`, state.effectivePowerState, true);
     await this.setState(`${device.baseId}.status.effectivePowerState_de`, state.effectivePowerStateDe, true);
     await this.setState(`${device.baseId}.status.isEffectivelyOn`, state.isEffectivelyOn, true);
+  }
+
+  private async ensureHobActiveZoneObjects(device: RunningDevice): Promise<void> {
+    if (device.profile.type !== "Hob") return;
+    await this.ensureStateObject(`${device.baseId}.status.hobAnyZoneActive`, "Any hob zone active", false, "indicator");
+    await this.ensureStateObject(`${device.baseId}.status.hobActiveZonesJson`, "Active hob zones JSON", "[]", "json");
+    await this.ensureStateObject(`${device.baseId}.status.hobActiveZonesText`, "Active hob zones text", "", "text");
+    await this.ensureStateObject(`${device.baseId}.status.hobAnyResidualHeat`, "Any hob zone has residual heat", false, "indicator");
+    await this.ensureStateObject(`${device.baseId}.status.hobResidualHeatZonesJson`, "Residual heat hob zones JSON", "[]", "json");
+    await this.ensureStateObject(`${device.baseId}.status.hobResidualHeatZonesText`, "Residual heat hob zones text", "", "text");
+    await this.updateHobActiveZoneStates(device);
+  }
+
+  private async updateHobActiveZoneStates(device: RunningDevice): Promise<void> {
+    if (device.profile.type !== "Hob") return;
+    const summary = evaluateHobZoneSummary(device);
+    await this.setState(`${device.baseId}.status.hobAnyZoneActive`, summary.activeZones.length > 0, true);
+    await this.setState(`${device.baseId}.status.hobActiveZonesJson`, JSON.stringify(summary.activeZones), true);
+    await this.setState(`${device.baseId}.status.hobActiveZonesText`, summary.activeZonesText, true);
+    await this.setState(`${device.baseId}.status.hobAnyResidualHeat`, summary.residualHeatZones.length > 0, true);
+    await this.setState(`${device.baseId}.status.hobResidualHeatZonesJson`, JSON.stringify(summary.residualHeatZones), true);
+    await this.setState(`${device.baseId}.status.hobResidualHeatZonesText`, summary.residualHeatZonesText, true);
   }
 
   private async ensureStartAvailabilityStates(device: RunningDevice): Promise<void> {
@@ -1134,6 +1158,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.writeRootProgramAliasValues(device, target, normalizedValue);
     await this.updateStartAvailability(device);
     if (target.name === POWER_STATE_FEATURE) await this.updateEffectivePowerState(device);
+    if (isHobZoneFeature(target.name)) await this.updateHobActiveZoneStates(device);
     if (isWritable) {
       const numericUid = this.uidStringToNumber(target.uid);
       if (numericUid !== undefined) this.registerWritableState(device, stateId, numericUid, target.name, "value");

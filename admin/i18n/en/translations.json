@@ -29,7 +29,7 @@
   "mDNS discovery timeout in seconds": "mDNS discovery timeout in seconds",
   "How long each Home Connect mDNS discovery scan listens for responses.": "How long each Home Connect mDNS discovery scan listens for responses.",
   "Update hosts from discovered appliances": "Update hosts from discovered appliances",
-  "Prepared for a later PR. Currently discovered hosts are only shown in discovery states.": "Prepared for a later PR. Currently discovered hosts are only shown in discovery states.",
-  "Add discovered appliances automatically": "Add discovered appliances automatically",
-  "Prepared for a later PR. Currently discovered appliances are not added automatically.": "Prepared for a later PR. Currently discovered appliances are not added automatically."
+  "Automatically updates the host/IP address of existing configured appliances from safe mDNS matches.": "Automatically updates the host/IP address of existing configured appliances from safe mDNS matches.",
+  "Automatically enable/add discovered appliances": "Automatically enable/add discovered appliances",
+  "Automatically enables or adds uniquely discovered appliances to the device table when a matching profile ZIP is available.": "Automatically enables or adds uniquely discovered appliances to the device table when a matching profile ZIP is available."
 }

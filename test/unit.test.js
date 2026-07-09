@@ -180,3 +180,75 @@ test("discovery host update prefers IP address over local hostname", () => {
   const result = updateConfiguredDeviceHostsFromDiscovery([configuredDevice({})], [hostUpdateMatch({ discovery: { address: "192.0.2.30", host: "preferred-only-when-no-address.local" } })]);
   assert.equal(result.devices[0].host, "192.0.2.30");
 });
+
+const { addOrEnableConfiguredDevicesFromDiscovery } = require("../build/lib/discoveryConfigUpdate");
+
+function autoAddMatch(overrides) {
+  return hostUpdateMatch({
+    profile: {
+      haId: "ha-1",
+      type: "Dishwasher",
+      brand: "Bosch",
+      vib: "SMV123",
+      mac: "AA:BB:CC:DD:EE:FF",
+      connectionType: "TLS",
+      profileFile: "profile.zip",
+    },
+    ...overrides,
+  });
+}
+
+test("discovery auto-add enables existing disabled device for haId matches and sets host", () => {
+  const result = addOrEnableConfiguredDevicesFromDiscovery([configuredDevice({ enabled: false, host: "" })], [autoAddMatch({ match: "haId" })]);
+  assert.equal(result.devices[0].enabled, true);
+  assert.equal(result.devices[0].host, "192.0.2.20");
+  assert.deepEqual(result.enabled, [{ haId: "ha-1", oldEnabled: false, newEnabled: true, host: "192.0.2.20", match: "haId" }]);
+});
+
+test("discovery auto-add enables existing disabled device for mac matches and sets host", () => {
+  const result = addOrEnableConfiguredDevicesFromDiscovery([configuredDevice({ enabled: false, host: "" })], [autoAddMatch({ match: "mac" })]);
+  assert.equal(result.devices[0].enabled, true);
+  assert.equal(result.devices[0].host, "192.0.2.20");
+  assert.equal(result.enabled[0].match, "mac");
+});
+
+test("discovery auto-add creates missing configured device for haId matches", () => {
+  const result = addOrEnableConfiguredDevicesFromDiscovery([], [autoAddMatch({ match: "haId" })]);
+  assert.equal(result.devices.length, 1);
+  assert.equal(result.devices[0].enabled, true);
+  assert.equal(result.devices[0].haId, "ha-1");
+  assert.equal(result.devices[0].name, "Bosch SMV123 Dishwasher");
+  assert.equal(result.devices[0].connectionType, "TLS");
+  assert.deepEqual(result.added, [{ haId: "ha-1", host: "192.0.2.20", match: "haId" }]);
+});
+
+test("discovery auto-add skips brand type vib matches", () => {
+  const result = addOrEnableConfiguredDevicesFromDiscovery([], [autoAddMatch({ match: "brandTypeVib" })]);
+  assert.equal(result.devices.length, 0);
+  assert.equal(result.added.length, 0);
+});
+
+test("discovery auto-add skips matches without discovered host", () => {
+  const result = addOrEnableConfiguredDevicesFromDiscovery([], [autoAddMatch({ discovery: {} })]);
+  assert.equal(result.devices.length, 0);
+  assert.equal(result.added.length, 0);
+});
+
+test("discovery auto-add ignores unmatched discoveries because only profile matches are accepted", () => {
+  const result = addOrEnableConfiguredDevicesFromDiscovery([], []);
+  assert.equal(result.devices.length, 0);
+  assert.equal(result.added.length, 0);
+});
+
+test("discovery auto-add prefers IP address over local hostname", () => {
+  const result = addOrEnableConfiguredDevicesFromDiscovery([], [autoAddMatch({ discovery: { address: "192.0.2.30", host: "appliance.local" } })]);
+  assert.equal(result.devices[0].host, "192.0.2.30");
+});
+
+test("discovery auto-add keeps existing enabled devices enabled and does not duplicate them", () => {
+  const result = addOrEnableConfiguredDevicesFromDiscovery([configuredDevice({ enabled: true })], [autoAddMatch({})]);
+  assert.equal(result.devices.length, 1);
+  assert.equal(result.devices[0].enabled, true);
+  assert.equal(result.added.length, 0);
+  assert.equal(result.enabled.length, 0);
+});

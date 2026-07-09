@@ -304,3 +304,35 @@ test("discovery auto-add keeps existing enabled devices enabled and does not dup
   assert.equal(result.added.length, 0);
   assert.equal(result.enabled.length, 0);
 });
+
+const { shouldSendAutomaticStartOption, mergeStartOptionValues } = require("../build/lib/startOptions");
+
+const START_IN_RELATIVE = "BSH.Common.Option.StartInRelative";
+
+test("automatic start options skip StartInRelative zero", () => {
+  assert.equal(shouldSendAutomaticStartOption(START_IN_RELATIVE, 0), false);
+});
+
+test("automatic start options skip boolean false", () => {
+  assert.equal(shouldSendAutomaticStartOption("Dishcare.Dishwasher.Option.HygienePlus", false), false);
+});
+
+test("automatic start options send boolean true", () => {
+  assert.equal(shouldSendAutomaticStartOption("Dishcare.Dishwasher.Option.HygienePlus", true), true);
+});
+
+test("automatic start options skip values equal to program option default", () => {
+  assert.equal(shouldSendAutomaticStartOption("Dishcare.Dishwasher.Option.IntensivZone", "Off", "Off"), false);
+});
+
+test("explicit start options are preserved even when they look like automatic defaults", () => {
+  assert.deepEqual(mergeStartOptionValues([{ uid: 558, value: 0 }], []), [{ uid: 558, value: 0 }]);
+  assert.deepEqual(mergeStartOptionValues([{ uid: 5123, value: false }], []), [{ uid: 5123, value: false }]);
+});
+
+test("explicit start options win over automatic options for the same UID", () => {
+  assert.deepEqual(
+    mergeStartOptionValues([{ uid: 5127, value: false }], [{ uid: 5127, value: true }, { uid: 5128, value: true }]),
+    [{ uid: 5127, value: false }, { uid: 5128, value: true }],
+  );
+});

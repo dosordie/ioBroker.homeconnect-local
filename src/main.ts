@@ -22,7 +22,7 @@ import { loadProfiles } from "./lib/profile";
 import { DiscoveredHomeConnectDevice, DiscoveryProfileMatch, matchDiscoveredDeviceToProfile, startHomeConnectDiscovery, stopHomeConnectDiscovery } from "./lib/mdnsDiscovery";
 import { DiscoveryDeviceAdded, DiscoveryDeviceEnabled, DiscoveryHostUpdate, addOrEnableConfiguredDevicesFromDiscovery, updateConfiguredDeviceHostsFromDiscovery } from "./lib/discoveryConfigUpdate";
 import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/reconnectPolicy";
-import { RunningDevice, WritableState } from "./lib/runtimeTypes";
+import { recordHomeConnectFrame, RunningDevice, shouldHeartbeatDevice, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
 import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
 import { coerceStateValueForObjectType, finalProgramEndCompanionTargets, finalProgramEndDisplayTargets, isActiveProgramFinishedEventValue, isFinishedOperationState, OPERATION_STATE_FEATURE, PROGRAM_FINISHED_EVENT_FEATURE } from "./lib/programTelemetryFinalizer";
@@ -45,6 +45,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private discoveryProfiles: ApplianceProfile[] = [];
   private discoveredDevices = new Map<string, DiscoveredHomeConnectDevice>();
   private currentConfig: AdapterNativeConfig = {} as AdapterNativeConfig;
+  private connectionWatchdogTimer?: NodeJS.Timeout;
 
   public constructor(options: Partial<utils.AdapterOptions> = {}) {
     super({ ...options, name: "homeconnect-local" });
@@ -124,6 +125,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
 
     if (this.unloaded) return;
+    this.startConnectionWatchdog();
+
     for (const configuredDevice of this.currentConfig.devices ?? []) {
       if (!configuredDevice.enabled) {
         this.log.info(`${configuredDevice.haId || configuredDevice.name || "configured device"}: configured device is disabled, skipping connection`);
@@ -147,6 +150,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         mapper: new StateMapper(profile),
         reconnecting: false,
         reconnectFailures: 0,
+        watchdogReconnectCount: 0,
         connected: false,
         writableUids: new Set<string>(),
         readOnlyUids: new Set<string>(),
@@ -398,6 +402,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         mapper: new StateMapper(profile),
         reconnecting: false,
         reconnectFailures: 0,
+        watchdogReconnectCount: 0,
         connected: false,
         writableUids: new Set<string>(),
         readOnlyUids: new Set<string>(),
@@ -653,6 +658,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       appId: this.currentConfig.appId || "iobroker-homeconnect-local",
       log: this.log,
       messageHandler: message => this.handleDeviceMessage(device, message),
+      frameHandler: message => recordHomeConnectFrame(device, message.resource),
       closeHandler: error => this.scheduleReconnect(device, error),
     });
     device.client = client;
@@ -663,6 +669,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         await client.close().catch(closeError => this.log.debug(`Close after unload failed: ${String(closeError)}`));
         return;
       }
+      recordHomeConnectFrame(device);
       await this.setDeviceConnectionState(device, true);
       this.log.info(`${device.profile.haId}: connected`);
       if (this.unloaded) return;
@@ -968,6 +975,43 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }, seconds * 1000);
   }
 
+  private startConnectionWatchdog(): void {
+    if (this.connectionWatchdogTimer) return;
+    this.connectionWatchdogTimer = setInterval(() => {
+      void this.runConnectionWatchdog().catch(error => {
+        if (!this.unloaded) this.log.debug(`Connection watchdog failed: ${String(error)}`);
+      });
+    }, 60 * 1000);
+  }
+
+  private async runConnectionWatchdog(now = Date.now()): Promise<void> {
+    if (this.unloaded) return;
+    for (const device of this.devices.values()) {
+      if (!shouldHeartbeatDevice(device, now)) continue;
+      await this.checkDeviceHeartbeat(device, now);
+    }
+  }
+
+  private async checkDeviceHeartbeat(device: RunningDevice, now = Date.now()): Promise<void> {
+    if (this.unloaded || !shouldHeartbeatDevice(device, now)) return;
+    const client = device.client;
+    if (!client) return;
+    device.watchdogHeartbeatInFlight = true;
+    try {
+      await client.sendSync({ resource: "/ci/services", action: "GET" }, 15000);
+      recordHomeConnectFrame(device, "/ci/services");
+    } catch (error) {
+      if (this.unloaded) return;
+      const idleSeconds = Math.floor((now - (device.lastRxAt ?? now)) / 1000);
+      device.watchdogReconnectCount += 1;
+      this.log.warn(`${device.profile.haId}: no HomeConnect traffic for ${idleSeconds}s and heartbeat failed, reconnecting`);
+      await client.close().catch(closeError => this.log.debug(`${device.profile.haId}: watchdog close failed: ${String(closeError)}`));
+      this.scheduleReconnect(device, error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      device.watchdogHeartbeatInFlight = false;
+    }
+  }
+
   private logConnectionFailure(device: RunningDevice, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     device.reconnectFailures += 1;
@@ -993,6 +1037,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async handleDeviceMessage(device: RunningDevice, message: HcMessage): Promise<void> {
+    recordHomeConnectFrame(device, message.resource);
     await this.setState(`${device.baseId}.info.lastSeen`, new Date().toISOString(), true);
     await this.setState(`${device.baseId}.info.lastMessage`, JSON.stringify(message), true);
     if (message.resource === "/ci/info" || message.resource === "/iz/info") await writeApplianceInfo(this, device, message.data);
@@ -1296,6 +1341,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     this.unloaded = true;
     try {
       stopHomeConnectDiscovery();
+      if (this.connectionWatchdogTimer) {
+        clearInterval(this.connectionWatchdogTimer);
+        this.connectionWatchdogTimer = undefined;
+      }
       for (const device of this.devices.values()) {
         if (device.reconnectTimer) clearTimeout(device.reconnectTimer);
         await this.setDeviceConnectionState(device, false);

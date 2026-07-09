@@ -25,6 +25,7 @@ import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/re
 import { RunningDevice, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
 import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
+import { finalProgramTelemetryTargets, isActiveProgramFinishedEventValue, isFinishedOperationState, OPERATION_STATE_FEATURE, PROGRAM_FINISHED_EVENT_FEATURE } from "./lib/programTelemetryFinalizer";
 import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
 import { mergeStartOptionValues, shouldSendAutomaticStartOption } from "./lib/startOptions";
 import { evaluateStartAvailability, StartAvailability } from "./lib/startAvailability";
@@ -1068,7 +1069,25 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.setState(`${device.baseId}.raw.uid_${target.uid}`, JSON.stringify(value), true);
     }
     if (target.category === "events") await this.updateEventSummary(device);
+    await this.finalizeProgramTelemetryIfFinished(device, target, normalizedValue);
     if (target.name.includes(".Program.") || target.name.includes(".Setting.Favorite.")) await this.updateProgramList(device);
+  }
+
+
+  private async finalizeProgramTelemetryIfFinished(device: RunningDevice, target: StateTarget, value: ioBroker.StateValue): Promise<void> {
+    const operationFinished = target.name === OPERATION_STATE_FEATURE && isFinishedOperationState(value);
+    const programFinishedEventActive = target.name === PROGRAM_FINISHED_EVENT_FEATURE && isActiveProgramFinishedEventValue(value);
+    if (!operationFinished && !programFinishedEventActive) return;
+
+    const targets = finalProgramTelemetryTargets(device.profile, device.baseId);
+    if (targets.length === 0) return;
+
+    for (const telemetryTarget of targets) {
+      await this.setState(telemetryTarget.stateId, telemetryTarget.value, true);
+      device.stateValuesByFeature.set(telemetryTarget.feature, telemetryTarget.value);
+    }
+
+    this.log.debug(`${device.profile.haId}: finalizing program telemetry after finished state: ProgramProgress=100, RemainingProgramTime=0`);
   }
 
   private updateProgramOptionContextMarker(device: RunningDevice, target: StateTarget): void {

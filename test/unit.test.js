@@ -448,3 +448,90 @@ test("start availability resolves raw numeric values through enum mapping", () =
   assert.equal(evaluateStartAvailability({ ...base, rawValuesByFeature: new Map([["BSH.Common.Status.DoorState", 3], ["BSH.Common.Status.OperationState", 2], ["BSH.Common.Setting.PowerState", 1], ["BSH.Common.Status.RemoteControlStartAllowed", true], ["BSH.Common.Root.SelectedProgram", 100]]) }, true).reason, "power_off");
   assert.notEqual(evaluateStartAvailability({ ...base, rawValuesByFeature: new Map([["BSH.Common.Status.DoorState", 3], ["BSH.Common.Status.OperationState", 2], ["BSH.Common.Setting.PowerState", 2], ["BSH.Common.Status.RemoteControlStartAllowed", true], ["BSH.Common.Root.SelectedProgram", 100]]) }, true).reason, "power_off");
 });
+
+const {
+  finalProgramTelemetryTargets,
+  isActiveProgramFinishedEventValue,
+  isFinishedOperationState,
+} = require("../build/lib/programTelemetryFinalizer");
+
+function telemetryProfile() {
+  return {
+    haId: "ha-telemetry",
+    type: "Washer",
+    connectionType: "TLS",
+    key: "",
+    featureMapping: {
+      featuresByUid: {
+        "021C": "BSH.Common.Option.ProgramProgress",
+        "0220": "BSH.Common.Option.RemainingProgramTime",
+        "0228": "BSH.Common.Status.OperationState",
+        "0210": "BSH.Common.Root.ActiveProgram",
+      },
+      enumTypeByUid: { "0228": "OperationState" },
+      enumValuesByType: { OperationState: { 1: "Run", 2: "Ready", 3: "Running", 6: "Finished" } },
+      programOptionsByUid: {},
+    },
+  };
+}
+
+test("OperationState Finished is detected for final program telemetry", () => {
+  assert.equal(isFinishedOperationState("Finished"), true);
+  assert.equal(isFinishedOperationState(" Run "), false);
+  assert.equal(isFinishedOperationState("Running"), false);
+});
+
+test("ProgramFinished active values match event summary semantics", () => {
+  for (const value of [true, 1, "Present", "Confirmed", "true", "1"]) {
+    assert.equal(isActiveProgramFinishedEventValue(value), true);
+  }
+});
+
+test("ProgramFinished inactive values do not finalize program telemetry", () => {
+  for (const value of [false, 0, "Off", "false", "0", ""]) {
+    assert.equal(isActiveProgramFinishedEventValue(value), false);
+  }
+});
+
+test("final program telemetry targets write only mapped normal states", () => {
+  assert.deepEqual(finalProgramTelemetryTargets(telemetryProfile(), "appliance"), [
+    { feature: "BSH.Common.Option.ProgramProgress", value: 100, stateId: "appliance.options.ProgramProgress" },
+    { feature: "BSH.Common.Option.RemainingProgramTime", value: 0, stateId: "appliance.options.RemainingProgramTime" },
+  ]);
+});
+
+test("real ProgramProgress and RemainingProgramTime values map normally", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  const mapper = new StateMapper(telemetryProfile());
+  assert.deepEqual(mapper.toStateTarget({ uid: "021C", value: 98 }), {
+    id: "options.ProgramProgress",
+    name: "BSH.Common.Option.ProgramProgress",
+    value: 98,
+    rawValue: 98,
+    category: "options",
+    uid: "021C",
+  });
+  assert.deepEqual(mapper.toStateTarget({ uid: "0220", value: 60 }), {
+    id: "options.RemainingProgramTime",
+    name: "BSH.Common.Option.RemainingProgramTime",
+    value: 60,
+    rawValue: 60,
+    category: "options",
+    uid: "0220",
+  });
+});
+
+test("ActiveProgram zero is not a final telemetry target", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  const mapper = new StateMapper(telemetryProfile());
+  const activeProgram = mapper.toStateTarget({ uid: "0210", value: 0 });
+  assert.equal(activeProgram.id, "program.RootActiveProgram");
+  assert.deepEqual(finalProgramTelemetryTargets(telemetryProfile(), "appliance").map(target => target.stateId), [
+    "appliance.options.ProgramProgress",
+    "appliance.options.RemainingProgramTime",
+  ]);
+});
+
+test("final program telemetry targets do not include raw states", () => {
+  assert.equal(finalProgramTelemetryTargets(telemetryProfile(), "appliance").some(target => target.stateId.includes(".raw.")), false);
+});

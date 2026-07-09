@@ -45,6 +45,13 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     CupboardDryPlusReached: "Schranktrocken Plus erreicht",
     CleaningHeatExchanger: "Wärmetauscher reinigen",
     SlightlyDampReached: "Leicht feucht erreicht",
+    ColdRefreshing: "Kalt auffrischen",
+    GeneratingOzone: "Ozon erzeugen",
+    DegradingOzone: "Ozon abbauen",
+    GuardingOxy: "Oxy-Schutz läuft",
+    QuickCare: "Schnellpflege",
+    GentlyDryReached: "Schonend trocken erreicht",
+    ExtraDryReached: "Extra trocken erreicht",
   },
   PowerState: { Off: "Aus", On: "Ein", MainsOff: "Aus", Standby: "Standby" },
   OperationState: {
@@ -73,6 +80,41 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     Started: "Gestartet",
     Finished: "Beendet",
   },
+  StopWatchState: { Off: "Aus", Paused: "Pausiert", Running: "Läuft" },
+  Handling: { AsList: "Als Liste", AsButtons: "Als Tasten" },
+  OperationStatus: {
+    Bound: "Verbunden",
+    Calculating: "Berechnung läuft",
+    Disconnected: "Getrennt",
+    NoProgramFound: "Kein Programm gefunden",
+    ProgramAvailable: "Programm verfügbar",
+    Unbound: "Nicht verbunden",
+    Washing: "Waschen",
+  },
+  TextileType: { Cotton: "Baumwolle", Mixed: "Mischwäsche", Synthetic: "Synthetik" },
+  State: { Active: "Aktiv", NotSelectable: "Nicht auswählbar", Off: "Aus", ResiduelHeat: "Restwärme" },
+  PowerLevel: { Off: "Aus", KeepWarm: "Warmhalten", Boost1: "Boost 1", Boost2: "Boost 2" },
+  FryingSensorLevel: {
+    Off: "Aus",
+    Level01: "Stufe 1",
+    Level02: "Stufe 2",
+    Level03: "Stufe 3",
+    Level04: "Stufe 4",
+    Level05: "Stufe 5",
+  },
+  Shape: { Round: "Rund", Oval: "Oval", Rectangular: "Rechteckig", Octangular: "Achteckig" },
+  ZoneSelector: {
+    FrontLeft: "Vorne links",
+    FrontRight: "Vorne rechts",
+    RearLeft: "Hinten links",
+    RearRight: "Hinten rechts",
+    Left: "Links",
+    Right: "Rechts",
+    LeftAdd1: "Links Zusatz 1",
+    RightAdd1: "Rechts Zusatz 1",
+    RearLeftAdd1: "Hinten links Zusatz 1",
+    RearRightAdd1: "Hinten rechts Zusatz 1",
+  },
 };
 
 const DEFAULT_TRANSLATIONS: Record<string, string> = {
@@ -80,6 +122,8 @@ const DEFAULT_TRANSLATIONS: Record<string, string> = {
   MainsOff: "Aus",
   Standby: "Standby",
   Ajar: "Angelehnt",
+  Filled: "Gefüllt",
+  Poor: "Niedrig",
 };
 
 export function translateEnumValue(featureName: string | undefined, enumText: string, rawValue?: unknown): string {

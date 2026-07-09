@@ -9,7 +9,7 @@ export interface ActiveEventSummaryItem {
 
 const EVENT_TEXT_DE: Record<string, string> = {
   // Common
-  "BSH.Common.Event.ProgramAborted": "Letztes Programm abgebrochen",
+  "BSH.Common.Event.ProgramAborted": "Abbruchmeldung offen",
   "BSH.Common.Event.ProgramFinished": "Programm beendet",
   "BSH.Common.Event.AquaStopOccured": "AquaStop ausgelöst",
   "BSH.Common.Event.LowWaterPressure": "Wasserdruck zu niedrig",

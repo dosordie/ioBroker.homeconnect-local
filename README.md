@@ -24,9 +24,8 @@ Implemented now:
 - Cloud-adapter-like online indicator via `<device>.general.connected`.
 - Dynamic state creation from `FeatureMapping.xml` and live `/ro/*` values.
 - Enum translation from the downloaded device descriptions.
-- Diagnostic states for appliance info, network info, service versions and registered apps/devices.
-- Per-state metadata under `metadata.*` for availability, access, writability and raw data.
-- Program list states under `programs.availableList` and `programs.availableJson`.
+- Diagnostic states for appliance info, network info and registered apps/devices.
+- Program list states under `availablePrograms.availableList` and `availablePrograms.availableJson`.
 - Cloud-compatible root program states:
   - `program.RootSelectedProgram`
   - `program.RootActiveProgram`
@@ -96,7 +95,8 @@ Important config fields:
 - `autoAddProfiles`: automatically add scanned profiles to the device table.
 - `host`: appliance IP address or hostname.
 - `enabled`: enables the appliance connection.
-- `debugRaw`: writes raw UID states and detailed debug logs. Disable after testing if personal device/app names are visible.
+- `debugRaw`: logs received raw `/ro` values for debugging. Disable after testing if personal device/app names are visible.
+- `enableRawStates`: creates optional debug states under `raw.uid_<uid>` with raw Home Connect values. Defaults to `false`.
 
 ## Object layout
 
@@ -106,19 +106,17 @@ Example structure:
 homeconnect-local.0.<haId>.general.*
 homeconnect-local.0.<haId>.info.*
 homeconnect-local.0.<haId>.network.*
-homeconnect-local.0.<haId>.services.*
 homeconnect-local.0.<haId>.registeredDevices.*
 homeconnect-local.0.<haId>.status.*
 homeconnect-local.0.<haId>.program.*
-homeconnect-local.0.<haId>.programs.*
+homeconnect-local.0.<haId>.availablePrograms.*
 homeconnect-local.0.<haId>.options.*
 homeconnect-local.0.<haId>.settings.*
 homeconnect-local.0.<haId>.events.*
 homeconnect-local.0.<haId>.phases.*
 homeconnect-local.0.<haId>.commands.*
 homeconnect-local.0.<haId>.expertCommands.*
-homeconnect-local.0.<haId>.metadata.*
-homeconnect-local.0.<haId>.raw.uid_<uid>
+homeconnect-local.0.<haId>.raw.uid_<uid> (optional, only if enableRawStates=true)
 ```
 
 Important states:
@@ -131,8 +129,8 @@ info.lastError
 program.RootSelectedProgram
 program.RootActiveProgram
 program.startOptionsJson
-programs.availableList
-programs.availableJson
+availablePrograms.availableList
+availablePrograms.availableJson
 settings.PowerState
 commands.StartProgram
 commands.StartProgramWithOptions

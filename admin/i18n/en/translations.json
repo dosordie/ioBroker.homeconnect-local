@@ -20,5 +20,8 @@
   "Brand": "Brand",
   "VIB": "VIB",
   "Connection": "Connection",
-  "Profile file": "Profile file"
+  "Profile file": "Profile file",
+  "Create raw UID states": "Create raw UID states",
+  "Creates debug states raw.uid_<uid> with raw Home Connect values.": "Creates debug states raw.uid_<uid> with raw Home Connect values.",
+  "Log received raw /ro values": "Log received raw /ro values"
 }

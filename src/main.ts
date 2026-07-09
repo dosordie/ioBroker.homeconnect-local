@@ -1,7 +1,7 @@
 import * as utils from "@iobroker/adapter-core";
 
 import { HomeConnectClient } from "./lib/client";
-import { ensureDiagnosticStates, writeApplianceInfo, writeNetworkInfo, writeRegisteredDevices, writeServiceInfo } from "./lib/diagnosticsWriter";
+import { ensureDiagnosticStates, writeApplianceInfo, writeNetworkInfo, writeRegisteredDevices } from "./lib/diagnosticsWriter";
 import { ensureButtonStateObject, ensureChannel, ensureStateObject, setBooleanState, setNumberState, setTextState } from "./lib/objectHelpers";
 import { translateEnumValue } from "./lib/enumTranslations";
 import { displayNameForProgram, programStatesForDevice, resolveProgramKeyForDevice } from "./lib/programStates";
@@ -202,6 +202,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       native: { haId: profile.haId, type: profile.type, brand: profile.brand, vib: profile.vib, mac: profile.mac, connectionType: profile.connectionType, profileFile: profile.profileFile, host: config.host },
     });
 
+    await this.cleanupLegacyDeviceFolders(device);
+
     await this.ensureChannel(`${baseId}.general`, "General Information");
     await this.ensureStateObject(`${baseId}.general.connected`, "Connected", false, "indicator.connected");
     for (const id of ["name", "deviceID", "deviceType", "type", "brand", "vib", "eNumber", "mac", "serialNumber", "customerIndex", "fdString", "haVersion", "swVersion", "hwVersion", "deviceInfo"]) {
@@ -227,7 +229,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(`${baseId}.info.connectionType`, "Connection type", "", "text");
     await this.setState(`${baseId}.info.connectionType`, String(profile.connectionType), true);
 
-    for (const channel of ["status", "program", "phases", "options", "settings", "events", "programs", "commands", "raw", "metadata", "network", "services", "registeredDevices", "expertCommands"]) {
+    for (const channel of ["status", "program", "phases", "options", "settings", "events", "availablePrograms", "commands", "network", "registeredDevices", "expertCommands"]) {
       await this.ensureChannel(`${baseId}.${channel}`, channel);
     }
     await ensureDiagnosticStates(this, device);
@@ -242,13 +244,43 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.updateProgramList(device);
   }
 
+
+  private async cleanupLegacyDeviceFolders(device: RunningDevice): Promise<void> {
+    const folders = ["programs", "services", "metadata"];
+    if (this.currentConfig.enableRawStates !== true) folders.push("raw");
+    for (const folder of folders) {
+      await this.deleteDeviceFolder(device, folder);
+    }
+  }
+
+  private async deleteDeviceFolder(device: RunningDevice, folder: string): Promise<void> {
+    const safeFolder = sanitizeObjectId(folder);
+    if (safeFolder !== folder || folder.includes(".") || folder.includes("/")) {
+      this.log.warn(`${device.profile.haId}: refusing to delete unsafe folder ${JSON.stringify(folder)}`);
+      return;
+    }
+    const id = `${device.baseId}.${folder}`;
+    if (!id.startsWith(`${device.baseId}.`)) {
+      this.log.warn(`${device.profile.haId}: refusing to delete ${id} outside ${device.baseId}`);
+      return;
+    }
+    try {
+      const existing = await this.getObjectAsync(id);
+      if (!existing) return;
+      await this.delObjectAsync(id, { recursive: true });
+      this.log.info(`${device.profile.haId}: deleted obsolete object folder ${id}`);
+    } catch (error) {
+      this.log.warn(`${device.profile.haId}: deleting obsolete object folder ${id} failed: ${String(error)}`);
+    }
+  }
+
   private async ensureProgramStates(device: RunningDevice): Promise<void> {
     await this.ensureStateObject(`${device.baseId}.program.startOptionsJson`, "Start options JSON", "{}", "json", true);
     await this.ensureProgramDropdownStateObjects(device);
     await this.ensureStateObject(`${device.baseId}.program.selectedProgramName`, "Selected program name", "", "text");
     await this.ensureStateObject(`${device.baseId}.program.activeProgramName`, "Active program name", "", "text");
-    await this.ensureStateObject(`${device.baseId}.programs.availableList`, "Available programs list", "", "text");
-    await this.ensureStateObject(`${device.baseId}.programs.availableJson`, "Available programs JSON", "", "json");
+    await this.ensureStateObject(`${device.baseId}.availablePrograms.availableList`, "Available programs list", "", "text");
+    await this.ensureStateObject(`${device.baseId}.availablePrograms.availableJson`, "Available programs JSON", "", "json");
   }
 
   private async ensureProgramDropdownStateObjects(device: RunningDevice): Promise<void> {
@@ -626,7 +658,6 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.setState(`${device.baseId}.info.lastMessage`, JSON.stringify(message), true);
     if (message.resource === "/ci/info" || message.resource === "/iz/info") await writeApplianceInfo(this, device, message.data);
     if (message.resource === "/ni/info") await writeNetworkInfo(this, device, message.data);
-    if (message.resource === "/ci/services") await writeServiceInfo(this, device, message.data);
     if (message.resource === "/ci/registeredDevices") await writeRegisteredDevices(this, device, message.data);
     if (message.resource === "/ro/allDescriptionChanges" || message.resource === "/ro/descriptionChange") await this.applyDescriptionChanges(device, message.data);
     if (message.resource?.startsWith("/ro/")) {
@@ -650,12 +681,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       const stateId = `${device.baseId}.${target.id}`;
       if (target.category === "commands") {
         await this.prepareWritableCommandState(device, stateId, target);
-        await this.writeStateMetadata(device, target, access, value.available !== false, true, value.raw ?? value);
         continue;
       }
       const writable = this.canWriteTarget(device, target);
       await this.ensureStateObject(stateId, target.name, this.initialTargetValue(target), target.uid === POWER_STATE_UID ? "switch" : undefined, writable, this.commonMetadata(device, target, value));
-      await this.writeStateMetadata(device, target, access, value.available !== false, writable, value.raw ?? value);
       if (writable) this.registerWritableState(device, stateId, this.uidStringToNumber(uid) ?? Number(uid), target.name, "value");
       if (target.name === SELECTED_PROGRAM_FEATURE || target.name === ACTIVE_PROGRAM_FEATURE) await this.prepareRootProgramAliasObjects(device);
     }
@@ -668,7 +697,6 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     if (target.category === "commands") {
       await this.prepareWritableCommandState(device, stateId, target);
       await this.setState(stateId, false, true);
-      await this.writeStateMetadata(device, target, undefined, true, true, value);
       return;
     }
     const normalizedValue = this.normalizeTargetValue(device, target);
@@ -680,12 +708,12 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     device.rawValuesByFeature.set(target.name, target.rawValue);
     this.updateProgramOptionContextMarker(device, target);
     await this.writeRootProgramAliasValues(device, target, normalizedValue);
-    await this.writeStateMetadata(device, target, undefined, true, isWritable, value);
     if (isWritable) {
       const numericUid = this.uidStringToNumber(target.uid);
       if (numericUid !== undefined) this.registerWritableState(device, stateId, numericUid, target.name, "value");
     }
-    if (this.currentConfig.debugRaw) {
+    if (this.currentConfig.enableRawStates === true) {
+      await this.ensureChannel(`${device.baseId}.raw`, "raw");
       await this.ensureStateObject(`${device.baseId}.raw.uid_${target.uid}`, `Raw ${target.uid} ${target.name}`, "", "json");
       await this.setState(`${device.baseId}.raw.uid_${target.uid}`, JSON.stringify(value), true);
     }
@@ -723,26 +751,14 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
   }
 
-  private async writeStateMetadata(device: RunningDevice, target: StateTarget, access: string | undefined, available: boolean, writable: boolean, raw: unknown): Promise<void> {
-    const metaId = `${device.baseId}.metadata.${sanitizeObjectId(target.id)}`;
-    await this.ensureStateObject(`${metaId}_available`, `${target.name} available`, available, "indicator");
-    await this.ensureStateObject(`${metaId}_access`, `${target.name} access`, "", "text");
-    await this.ensureStateObject(`${metaId}_writable`, `${target.name} writable`, writable, "indicator");
-    await this.ensureStateObject(`${metaId}_raw`, `${target.name} raw metadata`, "", "json");
-    await this.setState(`${metaId}_available`, available, true);
-    if (access !== undefined) await this.setState(`${metaId}_access`, access, true);
-    await this.setState(`${metaId}_writable`, writable, true);
-    await this.setState(`${metaId}_raw`, JSON.stringify(raw), true);
-  }
-
   private async updateProgramList(device: RunningDevice): Promise<void> {
     const programs = Object.entries(device.profile.featureMapping.featuresByUid)
       .filter(([, featureName]) => featureName.includes(".Program."))
       .map(([uid, featureName]) => ({ uid: this.uidStringToNumber(uid), featureName, name: this.programDisplayName(device, featureName) }))
       .filter(item => item.uid !== undefined)
       .sort((a, b) => a.name.localeCompare(b.name));
-    await this.setState(`${device.baseId}.programs.availableJson`, JSON.stringify(programs), true);
-    await this.setState(`${device.baseId}.programs.availableList`, programs.map(item => item.name).join(", "), true);
+    await this.setState(`${device.baseId}.availablePrograms.availableJson`, JSON.stringify(programs), true);
+    await this.setState(`${device.baseId}.availablePrograms.availableList`, programs.map(item => item.name).join(", "), true);
     await this.ensureProgramDropdownStateObjects(device);
     await this.prepareRootProgramAliasObjects(device);
   }

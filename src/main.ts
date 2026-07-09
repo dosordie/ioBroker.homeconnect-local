@@ -22,7 +22,7 @@ import { loadProfiles } from "./lib/profile";
 import { DiscoveredHomeConnectDevice, DiscoveryProfileMatch, matchDiscoveredDeviceToProfile, startHomeConnectDiscovery, stopHomeConnectDiscovery } from "./lib/mdnsDiscovery";
 import { DiscoveryDeviceAdded, DiscoveryDeviceEnabled, DiscoveryHostUpdate, addOrEnableConfiguredDevicesFromDiscovery, updateConfiguredDeviceHostsFromDiscovery } from "./lib/discoveryConfigUpdate";
 import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/reconnectPolicy";
-import { recordHomeConnectFrame, RunningDevice, shouldHeartbeatDevice, WritableState } from "./lib/runtimeTypes";
+import { calculateIdleSeconds, recordHomeConnectFrame, RunningDevice, shouldHeartbeatDevice, WATCHDOG_HEARTBEAT_REQUEST, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
 import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
 import { coerceStateValueForObjectType, finalProgramEndCompanionTargets, finalProgramEndDisplayTargets, isActiveProgramFinishedEventValue, isFinishedOperationState, OPERATION_STATE_FEATURE, PROGRAM_FINISHED_EVENT_FEATURE } from "./lib/programTelemetryFinalizer";
@@ -36,6 +36,14 @@ interface DiscoveryScanResult {
   found: DiscoveredHomeConnectDevice[];
   matched: DiscoveryProfileMatch[];
   unmatched: DiscoveredHomeConnectDevice[];
+}
+
+function homeConnectResponseCodeFromError(error: unknown): number | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const match = error.message.match(/^Home Connect response code (\d+) /);
+  if (!match) return undefined;
+  const code = Number(match[1]);
+  return Number.isFinite(code) ? code : undefined;
 }
 
 class HomeconnectLocalAdapter extends utils.Adapter {
@@ -996,13 +1004,17 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     if (this.unloaded || !shouldHeartbeatDevice(device, now)) return;
     const client = device.client;
     if (!client) return;
+    const idleSeconds = calculateIdleSeconds(device.lastRxAt, now);
     device.watchdogHeartbeatInFlight = true;
     try {
-      await client.sendSync({ resource: "/ci/services", action: "GET" }, 15000);
-      recordHomeConnectFrame(device, "/ci/services");
+      await client.sendSync(WATCHDOG_HEARTBEAT_REQUEST, 15000);
+      recordHomeConnectFrame(device, WATCHDOG_HEARTBEAT_REQUEST.resource);
     } catch (error) {
       if (this.unloaded) return;
-      const idleSeconds = Math.floor((now - (device.lastRxAt ?? now)) / 1000);
+      const responseCode = homeConnectResponseCodeFromError(error);
+      if (responseCode !== undefined && responseCode >= 400) {
+        this.log.debug(`${device.profile.haId}: heartbeat returned HomeConnect code ${responseCode} for ${WATCHDOG_HEARTBEAT_REQUEST.resource}, reconnecting`);
+      }
       device.watchdogReconnectCount += 1;
       this.log.warn(`${device.profile.haId}: no HomeConnect traffic for ${idleSeconds}s and heartbeat failed, reconnecting`);
       await client.close().catch(closeError => this.log.debug(`${device.profile.haId}: watchdog close failed: ${String(closeError)}`));

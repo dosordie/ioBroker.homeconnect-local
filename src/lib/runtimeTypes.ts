@@ -1,6 +1,13 @@
 import { HomeConnectClient } from "./client";
 import { StateMapper } from "./stateMapper";
-import { ApplianceProfile, ConfiguredDevice } from "./types";
+import { ApplianceProfile, ConfiguredDevice, HcMessage } from "./types";
+
+export const WATCHDOG_HEARTBEAT_REQUEST: HcMessage = { resource: "/ni/info", version: 1, action: "GET" };
+
+export function calculateIdleSeconds(lastRxAt: number | undefined, now = Date.now()): number {
+  const effectiveLastRxAt = lastRxAt ?? now;
+  return Math.max(0, Math.floor((now - effectiveLastRxAt) / 1000));
+}
 
 export interface RunningDevice {
   baseId: string;

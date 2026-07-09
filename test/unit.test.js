@@ -60,7 +60,7 @@ test("forecast and telemetry options stay read-only despite program readWrite ac
   assert.equal(hasWritableProgramOption(profile, "0400"), false);
 });
 
-const { normalizeMac, matchDiscoveredDeviceToProfile } = require("../build/lib/mdnsDiscovery");
+const { normalizeDnsName, normalizeMac, devicesFromResponse, matchDiscoveredDeviceToProfile } = require("../build/lib/mdnsDiscovery");
 
 function discoveryProfile(overrides) {
   return {
@@ -81,6 +81,27 @@ test("normalizeMac accepts common MAC address formats", () => {
   assert.equal(normalizeMac("aa-bb-cc-dd-ee-ff"), "aabbccddeeff");
   assert.equal(normalizeMac("aabb.ccdd.eeff"), "aabbccddeeff");
   assert.equal(normalizeMac("not-a-mac"), undefined);
+});
+
+test("normalizeDnsName treats trailing dot as equivalent", () => {
+  assert.equal(normalizeDnsName("_homeconnect._tcp.local."), "_homeconnect._tcp.local");
+  assert.equal(normalizeDnsName("_homeconnect._tcp.local"), "_homeconnect._tcp.local");
+});
+
+test("mDNS response parsing recognizes service names with trailing dots", () => {
+  const devices = devicesFromResponse({
+    answers: [{ name: "_homeconnect._tcp.local.", type: "PTR", data: "Appliance._homeconnect._tcp.local." }],
+    additionals: [
+      { name: "Appliance._homeconnect._tcp.local.", type: "SRV", data: { target: "appliance.local.", port: 443 } },
+      { name: "Appliance._homeconnect._tcp.local.", type: "TXT", data: [Buffer.from("id=ha-1"), Buffer.from("brand=Bosch"), Buffer.from("type=Dishwasher"), Buffer.from("vib=SMV123")] },
+      { name: "appliance.local", type: "A", data: "192.0.2.10" },
+    ],
+  });
+  assert.equal(devices.length, 1);
+  assert.equal(devices[0].name, "appliance");
+  assert.equal(devices[0].host, "appliance.local");
+  assert.equal(devices[0].address, "192.0.2.10");
+  assert.equal(devices[0].id, "ha-1");
 });
 
 test("discovered appliance matches profile by haId first", () => {

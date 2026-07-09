@@ -92,6 +92,12 @@ export function normalizeMac(value: unknown): string | undefined {
   return hex.length === 12 ? hex : undefined;
 }
 
+export function normalizeDnsName(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const text = String(value).trim().toLowerCase().replace(/\.$/, "");
+  return text || undefined;
+}
+
 export function matchDiscoveredDeviceToProfile(discovery: DiscoveredHomeConnectDevice, profiles: ApplianceProfile[]): DiscoveryProfileMatch | undefined {
   if (discovery.id) {
     const profile = profiles.find(candidate => candidate.haId === discovery.id);
@@ -137,24 +143,30 @@ function normalizeKey(value: unknown): string | undefined {
   return text || undefined;
 }
 
-function devicesFromResponse(response: MdnsResponse): DiscoveredHomeConnectDevice[] {
+export function devicesFromResponse(response: MdnsResponse): DiscoveredHomeConnectDevice[] {
   const records = [...(response.answers ?? []), ...(response.additionals ?? []), ...(response.authorities ?? [])];
-  const ptrNames = records.filter(record => record.type === "PTR" && record.name === HOME_CONNECT_SERVICE && typeof record.data === "string").map(record => String(record.data));
+  const homeConnectService = normalizeDnsName(HOME_CONNECT_SERVICE);
+  const ptrNames = records
+    .filter(record => record.type === "PTR" && normalizeDnsName(record.name) === homeConnectService && typeof record.data === "string")
+    .map(record => normalizeDnsName(record.data))
+    .filter((name): name is string => name !== undefined);
   const serviceNames = new Set<string>(ptrNames);
   for (const record of records) {
-    if ((record.type === "SRV" || record.type === "TXT") && record.name?.endsWith(`.${HOME_CONNECT_SERVICE}`)) serviceNames.add(record.name);
+    const recordName = normalizeDnsName(record.name);
+    if ((record.type === "SRV" || record.type === "TXT") && recordName?.endsWith(`.${homeConnectService}`)) serviceNames.add(recordName);
   }
 
   const result: DiscoveredHomeConnectDevice[] = [];
   for (const serviceName of serviceNames) {
-    const srv = records.find(record => record.type === "SRV" && record.name === serviceName);
+    const srv = records.find(record => record.type === "SRV" && normalizeDnsName(record.name) === serviceName);
     const target = srv && isSrvData(srv.data) ? srv.data.target : undefined;
-    const addressRecord = records.find(record => (record.type === "A" || record.type === "AAAA") && record.name === target && typeof record.data === "string");
-    const txt = parseTxt(records.find(record => record.type === "TXT" && record.name === serviceName)?.data);
+    const normalizedTarget = normalizeDnsName(target);
+    const addressRecord = records.find(record => (record.type === "A" || record.type === "AAAA") && normalizeDnsName(record.name) === normalizedTarget && typeof record.data === "string");
+    const txt = parseTxt(records.find(record => record.type === "TXT" && normalizeDnsName(record.name) === serviceName)?.data);
     result.push({
       id: txt.id,
       name: instanceName(serviceName),
-      host: target,
+      host: normalizeDnsName(target),
       address: addressRecord?.data ? String(addressRecord.data) : undefined,
       port: srv && isSrvData(srv.data) ? srv.data.port : undefined,
       brand: txt.brand,
@@ -183,5 +195,7 @@ function parseTxt(data: unknown): Record<string, string> {
 }
 
 function instanceName(serviceName: string): string | undefined {
-  return serviceName.endsWith(`.${HOME_CONNECT_SERVICE}`) ? serviceName.slice(0, -(HOME_CONNECT_SERVICE.length + 1)) : serviceName;
+  const normalizedService = normalizeDnsName(serviceName);
+  const homeConnectService = normalizeDnsName(HOME_CONNECT_SERVICE);
+  return normalizedService?.endsWith(`.${homeConnectService}`) ? normalizedService.slice(0, -(String(homeConnectService).length + 1)) : normalizedService;
 }

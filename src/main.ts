@@ -157,10 +157,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       const match = matchDiscoveredDeviceToProfile(discovery, profiles);
       if (match) {
         matched.push(match);
-        this.log.info(`matched discovered appliance ${this.discoveryDisplayName(discovery)} to profile ${match.profile.haId} by ${match.match}`);
+        this.log.debug(`matched discovered appliance ${this.discoveryDisplayName(discovery)} to profile ${match.profile.haId} by ${match.match}`);
       } else {
         unmatched.push(discovery);
-        this.log.info(`unmatched discovered appliance ${this.discoveryDisplayName(discovery)}`);
+        this.log.debug(`unmatched discovered appliance ${this.discoveryDisplayName(discovery)}`);
       }
     }
     await this.setState("discovery.enabled", this.currentConfig.enableMdnsDiscovery === true, true);

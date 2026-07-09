@@ -52,6 +52,7 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
     QuickCare: "Schnellpflege",
     GentlyDryReached: "Schonend trocken erreicht",
     ExtraDryReached: "Extra trocken erreicht",
+    Finished: "Fertig",
   },
   PowerState: { Off: "Aus", On: "Ein", MainsOff: "Aus", Standby: "Standby" },
   OperationState: {
@@ -67,7 +68,7 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
   DoorState: { Open: "Offen", Closed: "Geschlossen", Locked: "Verriegelt", Ajar: "Angelehnt" },
   RemoteControl: { Active: "Aktiv", Inactive: "Inaktiv" },
   EndTrigger: {
-    ProgramFinished: "Programm beendet",
+    ProgramFinished: "Programm normal beendet",
     ProgramAbortedByUser: "Programm vom Benutzer abgebrochen",
     ProgramAbortedByAppliance: "Programm vom Gerät abgebrochen",
     ProgramAbortedByApplianceCriticalError: "Programm wegen kritischem Gerätefehler abgebrochen",

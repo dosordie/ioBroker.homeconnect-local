@@ -6,6 +6,12 @@ export const REMAINING_PROGRAM_TIME_FEATURE = "BSH.Common.Option.RemainingProgra
 export const OPERATION_STATE_FEATURE = "BSH.Common.Status.OperationState";
 export const PROGRAM_FINISHED_EVENT_FEATURE = "BSH.Common.Event.ProgramFinished";
 
+const FINAL_PHASE_FEATURES = [
+  "Dishcare.Dishwasher.Status.ProgramPhase",
+  "LaundryCare.Common.Option.ProcessPhase",
+  "LaundryCare.Dryer.Option.ProcessPhase",
+];
+
 export interface FinalProgramTelemetryTarget {
   feature: string;
   value: ioBroker.StateValue;
@@ -27,12 +33,36 @@ export function isActiveProgramFinishedEventValue(value: ioBroker.StateValue): b
   return true;
 }
 
+export function coerceStateValueForObjectType(value: ioBroker.StateValue, type: ioBroker.CommonType | undefined): ioBroker.StateValue {
+  if (type === "string" && typeof value !== "string") return String(value);
+  if (type === "number" && typeof value === "string" && value !== "") {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : value;
+  }
+  return value;
+}
+
 export function finalProgramTelemetryTargets(profile: ApplianceProfile, baseId: string): FinalProgramTelemetryTarget[] {
   const mapper = new StateMapper(profile);
   const targets: FinalProgramTelemetryTarget[] = [];
   addTarget(profile, mapper, baseId, targets, PROGRAM_PROGRESS_FEATURE, 100);
   addTarget(profile, mapper, baseId, targets, REMAINING_PROGRAM_TIME_FEATURE, 0);
   return targets;
+}
+
+export function finalProgramEndDisplayTargets(profile: ApplianceProfile, baseId: string): FinalProgramTelemetryTarget[] {
+  const mapper = new StateMapper(profile);
+  const targets = finalProgramTelemetryTargets(profile, baseId);
+  for (const feature of FINAL_PHASE_FEATURES) {
+    addTarget(profile, mapper, baseId, targets, feature, "Finished");
+  }
+  return targets;
+}
+
+export function finalProgramEndCompanionTargets(profile: ApplianceProfile, baseId: string): FinalProgramTelemetryTarget[] {
+  return finalProgramEndDisplayTargets(profile, baseId)
+    .filter(target => target.value === "Finished")
+    .map(target => ({ feature: `${target.feature}_de`, value: "Fertig", stateId: `${target.stateId}_de` }));
 }
 
 function addTarget(

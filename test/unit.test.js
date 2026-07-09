@@ -4,6 +4,7 @@ const { test } = require("node:test");
 const { translateEnumValue } = require("../build/lib/enumTranslations");
 const { metadataForFeature } = require("../build/lib/stateMetadata");
 const { hasWritableProgramOption } = require("../build/lib/optionWriteability");
+const { activeEventSummaryItems, activeEventSummaryTextDe } = require("../build/lib/eventSummary");
 
 function profileWithProgramOptions(programOptionsByUid) {
   return {
@@ -39,9 +40,15 @@ test("German ProcessPhase enum translations include laundry phases", () => {
 });
 
 test("German enum translations include EndTrigger and FlexStart", () => {
+  assert.equal(translateEnumValue("BSH.Common.Status.ProgramRunDetail.EndTrigger", "ProgramFinished", 0), "Programm normal beendet");
   assert.equal(
     translateEnumValue("BSH.Common.Status.ProgramRunDetail.EndTrigger", "ProgramAbortedByUser", 1),
     "Programm vom Benutzer abgebrochen",
+  );
+  assert.equal(translateEnumValue("BSH.Common.Status.ProgramRunDetail.EndTrigger", "ProgramAbortedByAppliance", 2), "Programm vom Gerät abgebrochen");
+  assert.equal(
+    translateEnumValue("BSH.Common.Status.ProgramRunDetail.EndTrigger", "ProgramAbortedByApplianceCriticalError", 3),
+    "Programm wegen kritischem Gerätefehler abgebrochen",
   );
   assert.equal(
     translateEnumValue("BSH.Common.Status.FlexStart", "Scheduled", 3),
@@ -450,6 +457,9 @@ test("start availability resolves raw numeric values through enum mapping", () =
 });
 
 const {
+  coerceStateValueForObjectType,
+  finalProgramEndCompanionTargets,
+  finalProgramEndDisplayTargets,
   finalProgramTelemetryTargets,
   isActiveProgramFinishedEventValue,
   isFinishedOperationState,
@@ -467,9 +477,10 @@ function telemetryProfile() {
         "0220": "BSH.Common.Option.RemainingProgramTime",
         "0228": "BSH.Common.Status.OperationState",
         "0210": "BSH.Common.Root.ActiveProgram",
+        "0221": "LaundryCare.Common.Option.ProcessPhase",
       },
-      enumTypeByUid: { "0228": "OperationState" },
-      enumValuesByType: { OperationState: { 1: "Run", 2: "Ready", 3: "Running", 6: "Finished" } },
+      enumTypeByUid: { "0228": "OperationState", "0221": "ProcessPhase" },
+      enumValuesByType: { OperationState: { 1: "Run", 2: "Ready", 3: "Running", 6: "Finished" }, ProcessPhase: { 5: "Washing", 21: "Drying" } },
       programOptionsByUid: {},
     },
   };
@@ -534,4 +545,77 @@ test("ActiveProgram zero is not a final telemetry target", () => {
 
 test("final program telemetry targets do not include raw states", () => {
   assert.equal(finalProgramTelemetryTargets(telemetryProfile(), "appliance").some(target => target.stateId.includes(".raw.")), false);
+});
+
+
+function dishwasherTelemetryProfile() {
+  return {
+    ...telemetryProfile(),
+    type: "Dishwasher",
+    featureMapping: {
+      ...telemetryProfile().featureMapping,
+      featuresByUid: {
+        ...telemetryProfile().featureMapping.featuresByUid,
+        "0301": "Dishcare.Dishwasher.Status.ProgramPhase",
+      },
+      enumTypeByUid: { ...telemetryProfile().featureMapping.enumTypeByUid, "0301": "ProgramPhase" },
+      enumValuesByType: { ...telemetryProfile().featureMapping.enumValuesByType, ProgramPhase: { 1: "MainWash", 2: "Drying" } },
+    },
+  };
+}
+
+test("final program end display targets include ProcessPhase and German companion but no raw states", () => {
+  assert.deepEqual(finalProgramEndDisplayTargets(telemetryProfile(), "appliance"), [
+    { feature: "BSH.Common.Option.ProgramProgress", value: 100, stateId: "appliance.options.ProgramProgress" },
+    { feature: "BSH.Common.Option.RemainingProgramTime", value: 0, stateId: "appliance.options.RemainingProgramTime" },
+    { feature: "LaundryCare.Common.Option.ProcessPhase", value: "Finished", stateId: "appliance.phases.ProcessPhase" },
+  ]);
+  assert.deepEqual(finalProgramEndCompanionTargets(telemetryProfile(), "appliance"), [
+    { feature: "LaundryCare.Common.Option.ProcessPhase_de", value: "Fertig", stateId: "appliance.phases.ProcessPhase_de" },
+  ]);
+  assert.equal(finalProgramEndDisplayTargets(telemetryProfile(), "appliance").some(target => target.stateId.includes(".raw.") || target.stateId.endsWith("_raw")), false);
+  assert.equal(finalProgramEndCompanionTargets(telemetryProfile(), "appliance").some(target => target.stateId.includes(".raw.") || target.stateId.endsWith("_raw")), false);
+});
+
+test("final program end display targets include dishwasher ProgramPhase when profile has it", () => {
+  assert.equal(finalProgramEndDisplayTargets(dishwasherTelemetryProfile(), "appliance").some(target => target.stateId === "appliance.phases.ProgramPhase" && target.value === "Finished"), true);
+  assert.equal(finalProgramEndCompanionTargets(dishwasherTelemetryProfile(), "appliance").some(target => target.stateId === "appliance.phases.ProgramPhase_de" && target.value === "Fertig"), true);
+});
+
+test("final program end display targets skip phases when profile has no phase feature", () => {
+  const profile = telemetryProfile();
+  delete profile.featureMapping.featuresByUid["0221"];
+  assert.deepEqual(finalProgramEndDisplayTargets(profile, "appliance").map(target => target.stateId), [
+    "appliance.options.ProgramProgress",
+    "appliance.options.RemainingProgramTime",
+  ]);
+  assert.deepEqual(finalProgramEndCompanionTargets(profile, "appliance"), []);
+});
+
+test("real phase values map normally and running states are not final states", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  const mapper = new StateMapper(telemetryProfile());
+  assert.deepEqual(mapper.toStateTarget({ uid: "0221", value: 5 }), {
+    id: "phases.ProcessPhase",
+    name: "LaundryCare.Common.Option.ProcessPhase",
+    value: "Washing",
+    rawValue: 5,
+    category: "phases",
+    uid: "0221",
+  });
+  assert.equal(isFinishedOperationState("Run"), false);
+  assert.equal(isFinishedOperationState("Running"), false);
+});
+
+test("finalized telemetry values respect object types", () => {
+  assert.equal(coerceStateValueForObjectType(0, "number"), 0);
+  assert.equal(coerceStateValueForObjectType(0, "string"), "0");
+  assert.equal(coerceStateValueForObjectType(100, "number"), 100);
+  assert.equal(coerceStateValueForObjectType(100, "string"), "100");
+  assert.equal(coerceStateValueForObjectType(0, undefined), 0);
+});
+
+test("ProgramAborted event summary text is neutral", () => {
+  const items = activeEventSummaryItems(new Map([["BSH.Common.Event.ProgramAborted", "Present"]]));
+  assert.equal(activeEventSummaryTextDe(items), "Abbruchmeldung offen");
 });

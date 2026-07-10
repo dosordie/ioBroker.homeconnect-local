@@ -829,6 +829,10 @@ test("effective power state maps connected known power states", () => {
   assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "On"]]) })).isEffectivelyOn, true);
   assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "MainsOff"]]) })).isEffectivelyOn, false);
   assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "Off"]]) })).isEffectivelyOn, false);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "BSH.Common.EnumType.PowerState.Off"]]) })).isEffectivelyOn, false);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "PowerState.Off"]]) })).isEffectivelyOn, false);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "BSH.Common.EnumType.PowerState.MainsOff"]]) })).isEffectivelyOn, false);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "BSH.Common.EnumType.PowerState.On"]]) })).isEffectivelyOn, true);
   assert.deepEqual(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "Standby"]]) })), {
     effectivePowerState: "Standby",
     effectivePowerStateDe: "Standby",
@@ -836,10 +840,15 @@ test("effective power state maps connected known power states", () => {
   });
 });
 
-test("effective power state resolves numeric raw PowerState through enum mapping", () => {
+test("effective power state resolves numeric PowerState through enum mapping", () => {
   const { evaluateEffectivePowerState } = require("../build/lib/effectivePowerState");
   assert.deepEqual(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map(), rawValuesByFeature: new Map([["BSH.Common.Setting.PowerState", 3]]) })), {
     effectivePowerState: "MainsOff",
+    effectivePowerStateDe: "Aus",
+    isEffectivelyOn: false,
+  });
+  assert.deepEqual(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", 1]]) })), {
+    effectivePowerState: "Off",
     effectivePowerStateDe: "Aus",
     isEffectivelyOn: false,
   });
@@ -866,6 +875,38 @@ test("hob active zone summary treats ActiveProgram with zero PowerLevel as activ
   assert.equal(summary.activeZones[0].zone, "120");
   assert.equal(summary.activeZones[0].activeProgram, 12289);
   assert.equal(summary.activeZones[0].powerLevel, 0);
+});
+
+test("hob active zone summary ignores default ActiveProgram when zone is explicitly off and ready", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  for (const activeProgram of ["Cooking.Hob.Program.PowerLevelMode", 12289]) {
+    const summary = evaluateHobZoneSummary(hobZoneDevice([
+      [hobFeature("100", "State"), "Off"],
+      [hobFeature("100", "OperationState"), "Ready"],
+      [hobFeature("100", "PowerLevel"), "Off"],
+      [hobFeature("100", "ActiveProgram"), activeProgram],
+    ]));
+    assert.equal(summary.activeZones.length, 0);
+  }
+});
+
+test("hob active zone summary treats State Active as active despite default ActiveProgram and off PowerLevel", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("120", "State"), "Active"],
+    [hobFeature("120", "ActiveProgram"), "Cooking.Hob.Program.PowerLevelMode"],
+    [hobFeature("120", "PowerLevel"), "Off"],
+  ]));
+  assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["120"]);
+});
+
+test("hob active zone summary treats active OperationState as active with off PowerLevel", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("130", "OperationState"), "Active"],
+    [hobFeature("130", "PowerLevel"), "Off"],
+  ]));
+  assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["130"]);
 });
 
 test("hob active zone summary treats positive PowerLevel as active", () => {

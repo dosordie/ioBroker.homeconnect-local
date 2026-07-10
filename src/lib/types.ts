@@ -61,6 +61,7 @@ export interface AdapterNativeConfig {
   appName?: string;
   appId?: string;
   reconnectInterval?: number;
+  watchdogHeartbeatIdleMinutes?: number;
   debugRaw?: boolean;
   enableRawStates?: boolean;
   autoAddProfiles?: boolean;

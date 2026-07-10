@@ -3,7 +3,7 @@ import * as utils from "@iobroker/adapter-core";
 import { HomeConnectClient } from "./lib/client";
 import { ensureDiagnosticStates, writeApplianceInfo, writeNetworkInfo, writeRegisteredDevices } from "./lib/diagnosticsWriter";
 import { ensureButtonStateObject, ensureChannel, ensureStateObject, setBooleanState, setNumberState, setTextState } from "./lib/objectHelpers";
-import { translateEnumValue } from "./lib/enumTranslations";
+import { translateEnumValue, translatedCompanionValueForTarget } from "./lib/enumTranslations";
 import { displayNameForProgram, programStatesForDevice, resolveProgramKeyForDevice } from "./lib/programStates";
 import { mergeMetadata, metadataForFeature, metadataFromDescriptionChange, StateCommonMetadata } from "./lib/stateMetadata";
 import {
@@ -1304,7 +1304,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(`${baseId}_raw`, `${target.name} raw`, 0, "value");
     await this.setState(`${baseId}_raw`, Number(target.rawValue), true);
     await this.ensureStateObject(`${baseId}_de`, `${target.name} German`, "", "text");
-    await this.setState(`${baseId}_de`, translateEnumValue(target.name, companionText, target.rawValue), true);
+    await this.setState(`${baseId}_de`, translatedCompanionValueForTarget(target, companionText), true);
   }
 
   private shouldWriteEnumCompanionStates(target: StateTarget): boolean {

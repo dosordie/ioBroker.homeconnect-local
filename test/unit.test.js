@@ -613,6 +613,44 @@ test("real phase values map normally and running states are not final states", (
 });
 
 
+test("Laundry Dryer ProcessPhase idle/no-phase values clear display value but keep raw value", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  const profile = telemetryProfile();
+  profile.featureMapping.featuresByUid["0221"] = "LaundryCare.Dryer.Option.ProcessPhase";
+  profile.featureMapping.enumValuesByType.ProcessPhase[0] = "NoPhase";
+  const mapper = new StateMapper(profile);
+
+  for (const rawValue of [0, "NoPhase", "No Phase", "Keine Phase", "LaundryCare.Dryer.Option.ProcessPhase.NoPhase"]) {
+    assert.deepEqual(mapper.toStateTarget({ uid: "0221", value: rawValue }), {
+      id: "phases.ProcessPhase",
+      name: "LaundryCare.Dryer.Option.ProcessPhase",
+      value: "",
+      rawValue,
+      category: "phases",
+      uid: "0221",
+    });
+  }
+});
+
+test("Laundry Dryer ProcessPhase real phase values map normally and keep raw companion input", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  const profile = telemetryProfile();
+  profile.featureMapping.featuresByUid["0221"] = "LaundryCare.Dryer.Option.ProcessPhase";
+  const mapper = new StateMapper(profile);
+  const target = mapper.toStateTarget({ uid: "0221", value: 21 });
+
+  assert.deepEqual(target, {
+    id: "phases.ProcessPhase",
+    name: "LaundryCare.Dryer.Option.ProcessPhase",
+    value: "Drying",
+    rawValue: 21,
+    category: "phases",
+    uid: "0221",
+  });
+  assert.equal(translateEnumValue(target.name, String(target.value), target.rawValue), "Trocknen");
+});
+
+
 test("Laundry ProcessPhase raw 255 clears display value but keeps raw value", () => {
   const { StateMapper } = require("../build/lib/stateMapper");
   for (const feature of ["LaundryCare.Common.Option.ProcessPhase", "LaundryCare.Dryer.Option.ProcessPhase"]) {

@@ -6,6 +6,16 @@ const IDLE_LAUNDRY_PROCESS_PHASE_FEATURES = new Set([
   "LaundryCare.Common.Option.ProcessPhase",
   "LaundryCare.Dryer.Option.ProcessPhase",
 ]);
+const IDLE_LAUNDRY_PROCESS_PHASE_VALUES = new Set(["0", "255", "nophase", "no phase", "keine phase"]);
+
+function isIdleLaundryProcessPhaseValue(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  const normalizedValue = String(value).trim().toLowerCase();
+  return IDLE_LAUNDRY_PROCESS_PHASE_VALUES.has(normalizedValue) || normalizedValue.endsWith(".nophase");
+}
 
 export class StateMapper {
   public constructor(private readonly profile: ApplianceProfile) {}
@@ -37,16 +47,16 @@ export class StateMapper {
     }
 
     const featureName = this.profile.featureMapping.featuresByUid[uid] ?? `uid_${uid}`;
-    if (IDLE_LAUNDRY_PROCESS_PHASE_FEATURES.has(featureName) && value.value === 255) {
-      const rawStateName = lastMeaningfulNamePart(featureName);
-      const stateName = sanitizeObjectId(this.stateNameFor(featureName, rawStateName));
-      const category = this.categoryFor(featureName, stateName);
-      return { id: `${category}.${stateName}`, name: featureName, value: "", rawValue: value.value, category, uid };
-    }
     const rawStateName = lastMeaningfulNamePart(featureName);
     const stateName = sanitizeObjectId(this.stateNameFor(featureName, rawStateName));
     const category = this.categoryFor(featureName, stateName);
     const translatedValue = this.translateValue(uid, value.value);
+    if (
+      IDLE_LAUNDRY_PROCESS_PHASE_FEATURES.has(featureName) &&
+      (isIdleLaundryProcessPhaseValue(value.value) || isIdleLaundryProcessPhaseValue(translatedValue))
+    ) {
+      return { id: `${category}.${stateName}`, name: featureName, value: "", rawValue: value.value, category, uid };
+    }
     const id = `${category}.${stateName}`;
 
     return {

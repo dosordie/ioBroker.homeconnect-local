@@ -394,6 +394,15 @@ Typical local handshake:
 6. Client requests `/ro/allDescriptionChanges` and `/ro/allMandatoryValues`.
 7. Live updates arrive through `/ro/values` and related `/ro/*` notifications.
 
+## Release notes
+
+### 0.0.17
+
+- Prepares version `0.0.17` for release to `main`.
+- Updates adapter version metadata and ioBroker news entry.
+- Adds release documentation for the 0.0.17 release preparation.
+- Contains no functional code changes, no new features and no runtime behavior changes.
+
 ## Credits / references
 
 This adapter is MIT licensed. It was built from local protocol observations and the following reference projects:

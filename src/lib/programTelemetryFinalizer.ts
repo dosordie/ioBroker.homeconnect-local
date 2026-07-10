@@ -92,6 +92,13 @@ export function clearProgramPhaseDisplayTargets(profile: ApplianceProfile, baseI
   ]);
 }
 
+export function nonEmptyClearProgramPhaseDisplayTargets(
+  targets: FinalProgramTelemetryTarget[],
+  currentValuesByFeature: ReadonlyMap<string, ioBroker.StateValue>,
+): FinalProgramTelemetryTarget[] {
+  return targets.filter(target => currentValuesByFeature.get(target.feature) !== "");
+}
+
 function addTarget(
   profile: ApplianceProfile,
   mapper: StateMapper,

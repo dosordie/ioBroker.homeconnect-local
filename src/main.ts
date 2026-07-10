@@ -25,7 +25,7 @@ import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/re
 import { calculateIdleSeconds, recordHomeConnectFrame, RunningDevice, shouldHeartbeatDevice, WATCHDOG_HEARTBEAT_REQUEST, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
 import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
-import { coerceStateValueForObjectType, finalProgramEndCompanionTargets, finalProgramEndDisplayTargets, isActiveProgramFinishedEventValue, isFinishedOperationState, OPERATION_STATE_FEATURE, PROGRAM_FINISHED_EVENT_FEATURE } from "./lib/programTelemetryFinalizer";
+import { clearProgramPhaseDisplayTargets, coerceStateValueForObjectType, finalProgramEndCompanionTargets, finalProgramEndDisplayTargets, isActiveProgramFinishedEventValue, isFinishedOperationState, isIdleOperationState, isNoActiveProgramValue, isOffEffectivePowerState, OPERATION_STATE_FEATURE, PROGRAM_FINISHED_EVENT_FEATURE } from "./lib/programTelemetryFinalizer";
 import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
 import { mergeStartOptionValues, shouldSendAutomaticStartOption } from "./lib/startOptions";
 import { evaluateStartAvailability, StartAvailability } from "./lib/startAvailability";
@@ -562,6 +562,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.setState(`${device.baseId}.status.effectivePowerState`, state.effectivePowerState, true);
     await this.setState(`${device.baseId}.status.effectivePowerState_de`, state.effectivePowerStateDe, true);
     await this.setState(`${device.baseId}.status.isEffectivelyOn`, state.isEffectivelyOn, true);
+    if (isOffEffectivePowerState(state.effectivePowerState)) await this.clearProgramPhaseDisplay(device);
   }
 
   private async ensureHobActiveZoneObjects(device: RunningDevice): Promise<void> {
@@ -1170,6 +1171,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
     if (target.category === "events") await this.updateEventSummary(device);
     await this.finalizeProgramEndDisplayIfFinished(device, target, normalizedValue);
+    await this.clearProgramPhaseDisplayIfIdle(device, target, normalizedValue);
     if (target.name.includes(".Program.") || target.name.includes(".Setting.Favorite.")) await this.updateProgramList(device);
   }
 
@@ -1188,6 +1190,23 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
 
     this.log.debug(`${device.profile.haId}: finalizing program end display after finished state: ProgramProgress=100, RemainingProgramTime=0, phases=Finished/Fertig`);
+  }
+
+  private async clearProgramPhaseDisplayIfIdle(device: RunningDevice, target: StateTarget, value: ioBroker.StateValue): Promise<void> {
+    const operationIdle = target.name === OPERATION_STATE_FEATURE && isIdleOperationState(value);
+    const noActiveProgram = target.name === ACTIVE_PROGRAM_FEATURE && isNoActiveProgramValue(value);
+    if (!operationIdle && !noActiveProgram) return;
+    await this.clearProgramPhaseDisplay(device);
+  }
+
+  private async clearProgramPhaseDisplay(device: RunningDevice): Promise<void> {
+    const targets = clearProgramPhaseDisplayTargets(device.profile, device.baseId);
+    if (targets.length === 0) return;
+    for (const phaseTarget of targets) {
+      await this.setStateRespectingObjectType(phaseTarget.stateId, phaseTarget.value);
+      device.stateValuesByFeature.set(phaseTarget.feature, phaseTarget.value);
+    }
+    this.log.debug(`${device.profile.haId}: clearing program phase display after idle/off state`);
   }
 
   private async setStateRespectingObjectType(id: string, value: ioBroker.StateValue): Promise<void> {

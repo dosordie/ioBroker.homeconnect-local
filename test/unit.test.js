@@ -457,12 +457,16 @@ test("start availability resolves raw numeric values through enum mapping", () =
 });
 
 const {
+  clearProgramPhaseDisplayTargets,
   coerceStateValueForObjectType,
   finalProgramEndCompanionTargets,
   finalProgramEndDisplayTargets,
   finalProgramTelemetryTargets,
   isActiveProgramFinishedEventValue,
   isFinishedOperationState,
+  isIdleOperationState,
+  isNoActiveProgramValue,
+  isOffEffectivePowerState,
 } = require("../build/lib/programTelemetryFinalizer");
 
 function telemetryProfile() {
@@ -633,6 +637,33 @@ test("Laundry ProcessPhase raw 255 does not clear raw companion input", () => {
   assert.equal(target.rawValue, 255);
   assert.equal(target.id, "phases.ProcessPhase");
   assert.equal(translateEnumValue(target.name, String(target.value), target.rawValue), "");
+});
+
+
+test("idle/off program end signals clear displayed phases", () => {
+  assert.deepEqual(clearProgramPhaseDisplayTargets(telemetryProfile(), "appliance"), [
+    { feature: "LaundryCare.Common.Option.ProcessPhase", value: "", stateId: "appliance.phases.ProcessPhase" },
+    { feature: "LaundryCare.Common.Option.ProcessPhase_de", value: "", stateId: "appliance.phases.ProcessPhase_de" },
+  ]);
+  assert.equal(isIdleOperationState("Ready"), true);
+  assert.equal(isIdleOperationState("Off"), true);
+  assert.equal(isIdleOperationState("Inactive"), true);
+  assert.equal(isIdleOperationState("Running"), false);
+  assert.equal(isNoActiveProgramValue(0), true);
+  assert.equal(isNoActiveProgramValue("0"), true);
+  assert.equal(isNoActiveProgramValue("Dishcare.Dishwasher.Program.Intensiv70"), false);
+  assert.equal(isOffEffectivePowerState("Offline"), true);
+  assert.equal(isOffEffectivePowerState("Off"), true);
+  assert.equal(isOffEffectivePowerState("MainsOff"), true);
+  assert.equal(isOffEffectivePowerState("Standby"), false);
+});
+
+test("clear phase targets include dishwasher ProgramPhase and German companion but no raw states", () => {
+  assert.deepEqual(clearProgramPhaseDisplayTargets(dishwasherTelemetryProfile(), "appliance").filter(target => target.stateId.includes("ProgramPhase")), [
+    { feature: "Dishcare.Dishwasher.Status.ProgramPhase", value: "", stateId: "appliance.phases.ProgramPhase" },
+    { feature: "Dishcare.Dishwasher.Status.ProgramPhase_de", value: "", stateId: "appliance.phases.ProgramPhase_de" },
+  ]);
+  assert.equal(clearProgramPhaseDisplayTargets(dishwasherTelemetryProfile(), "appliance").some(target => target.stateId.includes(".raw.") || target.stateId.endsWith("_raw")), false);
 });
 
 test("finalized telemetry values respect object types", () => {

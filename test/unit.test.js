@@ -467,6 +467,7 @@ const {
   isIdleOperationState,
   isNoActiveProgramValue,
   isOffEffectivePowerState,
+  nonEmptyClearProgramPhaseDisplayTargets,
 } = require("../build/lib/programTelemetryFinalizer");
 
 function telemetryProfile() {
@@ -664,6 +665,44 @@ test("clear phase targets include dishwasher ProgramPhase and German companion b
     { feature: "Dishcare.Dishwasher.Status.ProgramPhase_de", value: "", stateId: "appliance.phases.ProgramPhase_de" },
   ]);
   assert.equal(clearProgramPhaseDisplayTargets(dishwasherTelemetryProfile(), "appliance").some(target => target.stateId.includes(".raw.") || target.stateId.endsWith("_raw")), false);
+});
+
+
+test("clear phase targets only select non-empty display values", () => {
+  const targets = clearProgramPhaseDisplayTargets(telemetryProfile(), "appliance");
+  const currentValues = new Map([
+    ["LaundryCare.Common.Option.ProcessPhase", "Finished"],
+    ["LaundryCare.Common.Option.ProcessPhase_de", "Fertig"],
+    ["LaundryCare.Common.Option.ProcessPhase_raw", 255],
+  ]);
+
+  assert.deepEqual(nonEmptyClearProgramPhaseDisplayTargets(targets, currentValues), targets);
+  assert.equal(targets.some(target => target.stateId.includes(".raw.") || target.stateId.endsWith("_raw")), false);
+});
+
+test("clear phase targets do not select already empty display values", () => {
+  const targets = clearProgramPhaseDisplayTargets(telemetryProfile(), "appliance");
+  const currentValues = new Map([
+    ["LaundryCare.Common.Option.ProcessPhase", ""],
+    ["LaundryCare.Common.Option.ProcessPhase_de", ""],
+    ["LaundryCare.Common.Option.ProcessPhase_raw", 255],
+  ]);
+
+  assert.deepEqual(nonEmptyClearProgramPhaseDisplayTargets(targets, currentValues), []);
+  assert.equal(currentValues.get("LaundryCare.Common.Option.ProcessPhase_raw"), 255);
+});
+
+test("repeated idle/off clear only writes phase display targets once", () => {
+  const targets = clearProgramPhaseDisplayTargets(telemetryProfile(), "appliance");
+  const currentValues = new Map([
+    ["LaundryCare.Common.Option.ProcessPhase", "Finished"],
+    ["LaundryCare.Common.Option.ProcessPhase_de", "Fertig"],
+  ]);
+  const firstTargets = nonEmptyClearProgramPhaseDisplayTargets(targets, currentValues);
+  for (const target of firstTargets) currentValues.set(target.feature, target.value);
+
+  assert.deepEqual(firstTargets, targets);
+  assert.deepEqual(nonEmptyClearProgramPhaseDisplayTargets(targets, currentValues), []);
 });
 
 test("finalized telemetry values respect object types", () => {

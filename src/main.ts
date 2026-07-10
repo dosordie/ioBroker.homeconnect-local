@@ -25,7 +25,7 @@ import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/re
 import { calculateIdleSeconds, DEFAULT_WATCHDOG_HEARTBEAT_IDLE_MS, recordHomeConnectFrame, RunningDevice, shouldHeartbeatDevice, WATCHDOG_HEARTBEAT_REQUEST, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
 import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
-import { clearProgramPhaseDisplayTargets, coerceStateValueForObjectType, finalProgramEndCompanionTargets, finalProgramEndDisplayTargets, isActiveProgramFinishedEventValue, isFinishedOperationState, isIdleOperationState, isNoActiveProgramValue, isOffEffectivePowerState, OPERATION_STATE_FEATURE, PROGRAM_FINISHED_EVENT_FEATURE } from "./lib/programTelemetryFinalizer";
+import { clearProgramPhaseDisplayTargets, coerceStateValueForObjectType, finalProgramEndCompanionTargets, finalProgramEndDisplayTargets, isActiveProgramFinishedEventValue, isFinishedOperationState, isIdleOperationState, isNoActiveProgramValue, isOffEffectivePowerState, nonEmptyClearProgramPhaseDisplayTargets, OPERATION_STATE_FEATURE, PROGRAM_FINISHED_EVENT_FEATURE } from "./lib/programTelemetryFinalizer";
 import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
 import { mergeStartOptionValues, shouldSendAutomaticStartOption } from "./lib/startOptions";
 import { evaluateStartAvailability, StartAvailability } from "./lib/startAvailability";
@@ -1213,7 +1213,22 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private async clearProgramPhaseDisplay(device: RunningDevice): Promise<void> {
     const targets = clearProgramPhaseDisplayTargets(device.profile, device.baseId);
     if (targets.length === 0) return;
-    for (const phaseTarget of targets) {
+
+    const currentValuesByFeature = new Map<string, ioBroker.StateValue>();
+    for (const target of targets) {
+      if (device.stateValuesByFeature.has(target.feature)) {
+        currentValuesByFeature.set(target.feature, device.stateValuesByFeature.get(target.feature)!);
+        continue;
+      }
+      const state = await this.getStateAsync(target.stateId);
+      currentValuesByFeature.set(target.feature, state?.val ?? "");
+      device.stateValuesByFeature.set(target.feature, state?.val ?? "");
+    }
+
+    const targetsToClear = nonEmptyClearProgramPhaseDisplayTargets(targets, currentValuesByFeature);
+    if (targetsToClear.length === 0) return;
+
+    for (const phaseTarget of targetsToClear) {
       await this.setStateRespectingObjectType(phaseTarget.stateId, phaseTarget.value);
       device.stateValuesByFeature.set(phaseTarget.feature, phaseTarget.value);
     }

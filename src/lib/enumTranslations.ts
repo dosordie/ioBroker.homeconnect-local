@@ -1,3 +1,5 @@
+import type { StateTarget } from "./types";
+
 const TRANSLATIONS: Record<string, Record<string, string>> = {
   ProgramPhase: {
     None: "Keine",
@@ -134,4 +136,12 @@ export function translateEnumValue(featureName: string | undefined, enumText: st
     return `Unbekannt (${String(rawValue)})`;
   }
   return translated;
+}
+
+export function translatedCompanionValueForTarget(target: StateTarget, companionText: string): string {
+  if (target.value === "") {
+    return "";
+  }
+
+  return translateEnumValue(target.name, companionText, target.rawValue);
 }

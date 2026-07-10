@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 
-const { translateEnumValue } = require("../build/lib/enumTranslations");
+const { translateEnumValue, translatedCompanionValueForTarget } = require("../build/lib/enumTranslations");
 const { metadataForFeature } = require("../build/lib/stateMetadata");
 const { hasWritableProgramOption } = require("../build/lib/optionWriteability");
 const { activeEventSummaryItems, activeEventSummaryTextDe } = require("../build/lib/eventSummary");
@@ -630,6 +630,44 @@ test("Laundry Dryer ProcessPhase idle/no-phase values clear display value but ke
       uid: "0221",
     });
   }
+});
+
+test("translated companion values stay empty for intentionally cleared ProcessPhase targets", () => {
+  const cases = [
+    { name: "LaundryCare.Dryer.Option.ProcessPhase", value: "", rawValue: 0, enumText: "NoPhase" },
+    { name: "LaundryCare.Dryer.Option.ProcessPhase", value: "", rawValue: "NoPhase", enumText: "NoPhase" },
+    { name: "LaundryCare.Dryer.Option.ProcessPhase", value: "", rawValue: "Keine Phase", enumText: "Keine Phase" },
+    { name: "LaundryCare.Common.Option.ProcessPhase", value: "", rawValue: 255, enumText: "NoPhase" },
+  ];
+
+  for (const item of cases) {
+    const target = {
+      id: "phases.ProcessPhase",
+      name: item.name,
+      value: item.value,
+      rawValue: item.rawValue,
+      category: "phases",
+      uid: "0221",
+    };
+    assert.equal(translatedCompanionValueForTarget(target, item.enumText), "");
+    assert.equal(target.rawValue, item.rawValue);
+  }
+});
+
+test("translated companion values keep real and finished ProcessPhase translations", () => {
+  const dryingTarget = {
+    id: "phases.ProcessPhase",
+    name: "LaundryCare.Dryer.Option.ProcessPhase",
+    value: "Drying",
+    rawValue: 21,
+    category: "phases",
+    uid: "0221",
+  };
+  const finishedTarget = { ...dryingTarget, value: "Finished", rawValue: 6 };
+
+  assert.equal(translatedCompanionValueForTarget(dryingTarget, "Drying"), "Trocknen");
+  assert.equal(translatedCompanionValueForTarget(finishedTarget, "Finished"), "Fertig");
+  assert.equal(dryingTarget.rawValue, 21);
 });
 
 test("Laundry Dryer ProcessPhase real phase values map normally and keep raw companion input", () => {

@@ -2,9 +2,13 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.16",
+    "version": "0.0.17",
     "icon": "homeconnect-local.svg",
     "news": {
+      "0.0.17": {
+        "en": "Prepares the 0.0.17 release with updated documentation and release notes.",
+        "de": "Bereitet das Release 0.0.17 mit aktualisierter Dokumentation und Release-Notizen vor."
+      },
       "0.0.16": {
         "en": "Adds optional mDNS discovery for local Home Connect appliances.",
         "de": "Ergänzt optionale mDNS-Erkennung für lokale Home-Connect-Geräte."
@@ -118,6 +122,7 @@
     "appName": "ioBroker HomeConnect Local",
     "appId": "iobroker-homeconnect-local",
     "reconnectInterval": 30,
+    "watchdogHeartbeatIdleMinutes": 10,
     "debugRaw": false,
     "autoAddProfiles": true,
     "devices": [],

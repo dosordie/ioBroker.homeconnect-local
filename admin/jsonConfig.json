@@ -76,6 +76,14 @@
           "sm": 12,
           "md": 6
         },
+        "watchdogHeartbeatIdleMinutes": {
+          "type": "number",
+          "label": "Watchdog heartbeat idle threshold in minutes",
+          "help": "The connection watchdog sends /ni/info only after this many minutes without any Home Connect traffic. Reconnect is attempted only if that heartbeat fails.",
+          "min": 1,
+          "sm": 12,
+          "md": 6
+        },
         "debugRaw": {
           "type": "checkbox",
           "label": "Log received raw /ro values",

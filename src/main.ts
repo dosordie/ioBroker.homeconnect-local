@@ -3,7 +3,7 @@ import * as utils from "@iobroker/adapter-core";
 import { HomeConnectClient } from "./lib/client";
 import { ensureDiagnosticStates, writeApplianceInfo, writeNetworkInfo, writeRegisteredDevices } from "./lib/diagnosticsWriter";
 import { ensureButtonStateObject, ensureChannel, ensureStateObject, setBooleanState, setNumberState, setTextState } from "./lib/objectHelpers";
-import { translateEnumValue } from "./lib/enumTranslations";
+import { translateEnumValue, translatedCompanionValueForTarget } from "./lib/enumTranslations";
 import { displayNameForProgram, programStatesForDevice, resolveProgramKeyForDevice } from "./lib/programStates";
 import { mergeMetadata, metadataForFeature, metadataFromDescriptionChange, StateCommonMetadata } from "./lib/stateMetadata";
 import {
@@ -22,13 +22,15 @@ import { loadProfiles } from "./lib/profile";
 import { DiscoveredHomeConnectDevice, DiscoveryProfileMatch, matchDiscoveredDeviceToProfile, startHomeConnectDiscovery, stopHomeConnectDiscovery } from "./lib/mdnsDiscovery";
 import { DiscoveryDeviceAdded, DiscoveryDeviceEnabled, DiscoveryHostUpdate, addOrEnableConfiguredDevicesFromDiscovery, updateConfiguredDeviceHostsFromDiscovery } from "./lib/discoveryConfigUpdate";
 import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/reconnectPolicy";
-import { RunningDevice, WritableState } from "./lib/runtimeTypes";
+import { calculateIdleSeconds, DEFAULT_WATCHDOG_HEARTBEAT_IDLE_MS, recordHomeConnectFrame, RunningDevice, shouldHeartbeatDevice, WATCHDOG_HEARTBEAT_REQUEST, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
 import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
-import { finalProgramTelemetryTargets, isActiveProgramFinishedEventValue, isFinishedOperationState, OPERATION_STATE_FEATURE, PROGRAM_FINISHED_EVENT_FEATURE } from "./lib/programTelemetryFinalizer";
+import { clearProgramPhaseDisplayTargets, coerceStateValueForObjectType, finalProgramEndCompanionTargets, finalProgramEndDisplayTargets, isActiveProgramFinishedEventValue, isFinishedOperationState, isIdleOperationState, isNoActiveProgramValue, isOffEffectivePowerState, nonEmptyClearProgramPhaseDisplayTargets, OPERATION_STATE_FEATURE, PROGRAM_FINISHED_EVENT_FEATURE } from "./lib/programTelemetryFinalizer";
 import { durationToSeconds, isTruthyWrite, parseJsonObject, stateValueToPowerBoolean, stateValueToRaw, toStateValue } from "./lib/valueConverter";
 import { mergeStartOptionValues, shouldSendAutomaticStartOption } from "./lib/startOptions";
 import { evaluateStartAvailability, StartAvailability } from "./lib/startAvailability";
+import { evaluateEffectivePowerState, POWER_STATE_FEATURE } from "./lib/effectivePowerState";
+import { evaluateHobZoneSummary, isHobZoneFeature } from "./lib/hobActiveZones";
 import { hasWritableProgramOption, isProgramOptionDescriptionWritable, isReadOnlyProgramOption, isWritableAccess, normalizedAccess } from "./lib/optionWriteability";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue, StateTarget } from "./lib/types";
 
@@ -38,6 +40,14 @@ interface DiscoveryScanResult {
   unmatched: DiscoveredHomeConnectDevice[];
 }
 
+function homeConnectResponseCodeFromError(error: unknown): number | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const match = error.message.match(/^Home Connect response code (\d+) /);
+  if (!match) return undefined;
+  const code = Number(match[1]);
+  return Number.isFinite(code) ? code : undefined;
+}
+
 class HomeconnectLocalAdapter extends utils.Adapter {
   private devices = new Map<string, RunningDevice>();
   private writableStates = new Map<string, WritableState>();
@@ -45,6 +55,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private discoveryProfiles: ApplianceProfile[] = [];
   private discoveredDevices = new Map<string, DiscoveredHomeConnectDevice>();
   private currentConfig: AdapterNativeConfig = {} as AdapterNativeConfig;
+  private connectionWatchdogTimer?: NodeJS.Timeout;
 
   public constructor(options: Partial<utils.AdapterOptions> = {}) {
     super({ ...options, name: "homeconnect-local" });
@@ -124,6 +135,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }
 
     if (this.unloaded) return;
+    this.startConnectionWatchdog();
+
     for (const configuredDevice of this.currentConfig.devices ?? []) {
       if (!configuredDevice.enabled) {
         this.log.info(`${configuredDevice.haId || configuredDevice.name || "configured device"}: configured device is disabled, skipping connection`);
@@ -147,6 +160,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         mapper: new StateMapper(profile),
         reconnecting: false,
         reconnectFailures: 0,
+        watchdogReconnectCount: 0,
         connected: false,
         writableUids: new Set<string>(),
         readOnlyUids: new Set<string>(),
@@ -398,6 +412,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         mapper: new StateMapper(profile),
         reconnecting: false,
         reconnectFailures: 0,
+        watchdogReconnectCount: 0,
         connected: false,
         writableUids: new Set<string>(),
         readOnlyUids: new Set<string>(),
@@ -488,6 +503,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.ensureChannel(`${baseId}.${channel}`, channel);
     }
     await ensureDiagnosticStates(this, device);
+    await this.ensureEffectivePowerStateObjects(device);
+    await this.ensureHobActiveZoneObjects(device);
     await this.ensureStartAvailabilityStates(device);
     await this.ensureProgramStates(device);
     await this.ensureEventSummaryStates(device);
@@ -531,6 +548,43 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     } catch (error) {
       this.log.warn(`${device.profile.haId}: deleting obsolete object folder ${id} failed: ${String(error)}`);
     }
+  }
+
+  private async ensureEffectivePowerStateObjects(device: RunningDevice): Promise<void> {
+    await this.ensureStateObject(`${device.baseId}.status.effectivePowerState`, "Effective power state", "Offline", "text");
+    await this.ensureStateObject(`${device.baseId}.status.effectivePowerState_de`, "Effective power state (German)", "Aus / offline", "text");
+    await this.ensureStateObject(`${device.baseId}.status.isEffectivelyOn`, "Device is effectively on", false, "indicator");
+    await this.updateEffectivePowerState(device);
+  }
+
+  private async updateEffectivePowerState(device: RunningDevice): Promise<void> {
+    const state = evaluateEffectivePowerState(device);
+    await this.setState(`${device.baseId}.status.effectivePowerState`, state.effectivePowerState, true);
+    await this.setState(`${device.baseId}.status.effectivePowerState_de`, state.effectivePowerStateDe, true);
+    await this.setState(`${device.baseId}.status.isEffectivelyOn`, state.isEffectivelyOn, true);
+    if (isOffEffectivePowerState(state.effectivePowerState)) await this.clearProgramPhaseDisplay(device);
+  }
+
+  private async ensureHobActiveZoneObjects(device: RunningDevice): Promise<void> {
+    if (device.profile.type !== "Hob") return;
+    await this.ensureStateObject(`${device.baseId}.status.hobAnyZoneActive`, "Any hob zone active", false, "indicator");
+    await this.ensureStateObject(`${device.baseId}.status.hobActiveZonesJson`, "Active hob zones JSON", "[]", "json");
+    await this.ensureStateObject(`${device.baseId}.status.hobActiveZonesText`, "Active hob zones text", "", "text");
+    await this.ensureStateObject(`${device.baseId}.status.hobAnyResidualHeat`, "Any hob zone has residual heat", false, "indicator");
+    await this.ensureStateObject(`${device.baseId}.status.hobResidualHeatZonesJson`, "Residual heat hob zones JSON", "[]", "json");
+    await this.ensureStateObject(`${device.baseId}.status.hobResidualHeatZonesText`, "Residual heat hob zones text", "", "text");
+    await this.updateHobActiveZoneStates(device);
+  }
+
+  private async updateHobActiveZoneStates(device: RunningDevice): Promise<void> {
+    if (device.profile.type !== "Hob") return;
+    const summary = evaluateHobZoneSummary(device);
+    await this.setState(`${device.baseId}.status.hobAnyZoneActive`, summary.activeZones.length > 0, true);
+    await this.setState(`${device.baseId}.status.hobActiveZonesJson`, JSON.stringify(summary.activeZones), true);
+    await this.setState(`${device.baseId}.status.hobActiveZonesText`, summary.activeZonesText, true);
+    await this.setState(`${device.baseId}.status.hobAnyResidualHeat`, summary.residualHeatZones.length > 0, true);
+    await this.setState(`${device.baseId}.status.hobResidualHeatZonesJson`, JSON.stringify(summary.residualHeatZones), true);
+    await this.setState(`${device.baseId}.status.hobResidualHeatZonesText`, summary.residualHeatZonesText, true);
   }
 
   private async ensureStartAvailabilityStates(device: RunningDevice): Promise<void> {
@@ -653,6 +707,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       appId: this.currentConfig.appId || "iobroker-homeconnect-local",
       log: this.log,
       messageHandler: message => this.handleDeviceMessage(device, message),
+      frameHandler: message => recordHomeConnectFrame(device, message.resource),
       closeHandler: error => this.scheduleReconnect(device, error),
     });
     device.client = client;
@@ -663,6 +718,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         await client.close().catch(closeError => this.log.debug(`Close after unload failed: ${String(closeError)}`));
         return;
       }
+      recordHomeConnectFrame(device);
       await this.setDeviceConnectionState(device, true);
       this.log.info(`${device.profile.haId}: connected`);
       if (this.unloaded) return;
@@ -968,6 +1024,58 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     }, seconds * 1000);
   }
 
+  private startConnectionWatchdog(): void {
+    if (this.connectionWatchdogTimer) return;
+    this.connectionWatchdogTimer = setInterval(() => {
+      void this.runConnectionWatchdog().catch(error => {
+        if (!this.unloaded) this.log.debug(`Connection watchdog failed: ${String(error)}`);
+      });
+    }, 60 * 1000);
+  }
+
+  private async runConnectionWatchdog(now = Date.now()): Promise<void> {
+    if (this.unloaded) return;
+    for (const device of this.devices.values()) {
+      if (!this.shouldHeartbeatDevice(device, now)) continue;
+      await this.checkDeviceHeartbeat(device, now);
+    }
+  }
+
+
+  private shouldHeartbeatDevice(device: RunningDevice, now = Date.now()): boolean {
+    return shouldHeartbeatDevice(device, now, this.watchdogHeartbeatIdleMs());
+  }
+
+  private watchdogHeartbeatIdleMs(): number {
+    const configuredMinutes = Number(this.currentConfig.watchdogHeartbeatIdleMinutes ?? DEFAULT_WATCHDOG_HEARTBEAT_IDLE_MS / 60_000);
+    const effectiveMinutes = Number.isFinite(configuredMinutes) ? Math.max(1, configuredMinutes) : DEFAULT_WATCHDOG_HEARTBEAT_IDLE_MS / 60_000;
+    return effectiveMinutes * 60_000;
+  }
+
+  private async checkDeviceHeartbeat(device: RunningDevice, now = Date.now()): Promise<void> {
+    if (this.unloaded || !this.shouldHeartbeatDevice(device, now)) return;
+    const client = device.client;
+    if (!client) return;
+    const idleSeconds = calculateIdleSeconds(device.lastRxAt, now);
+    device.watchdogHeartbeatInFlight = true;
+    try {
+      await client.sendSync(WATCHDOG_HEARTBEAT_REQUEST, 15000);
+      recordHomeConnectFrame(device, WATCHDOG_HEARTBEAT_REQUEST.resource);
+    } catch (error) {
+      if (this.unloaded) return;
+      const responseCode = homeConnectResponseCodeFromError(error);
+      if (responseCode !== undefined && responseCode >= 400) {
+        this.log.debug(`${device.profile.haId}: heartbeat returned HomeConnect code ${responseCode} for ${WATCHDOG_HEARTBEAT_REQUEST.resource}, reconnecting`);
+      }
+      device.watchdogReconnectCount += 1;
+      this.log.warn(`${device.profile.haId}: no HomeConnect traffic for ${idleSeconds}s and heartbeat failed, reconnecting`);
+      await client.close().catch(closeError => this.log.debug(`${device.profile.haId}: watchdog close failed: ${String(closeError)}`));
+      this.scheduleReconnect(device, error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      device.watchdogHeartbeatInFlight = false;
+    }
+  }
+
   private logConnectionFailure(device: RunningDevice, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     device.reconnectFailures += 1;
@@ -989,10 +1097,12 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.setState(`${device.baseId}.info.lastError`, error instanceof Error ? error.message : String(error), true);
     }
     await this.updateGlobalConnectionState();
+    await this.updateEffectivePowerState(device);
     await this.updateStartAvailability(device);
   }
 
   private async handleDeviceMessage(device: RunningDevice, message: HcMessage): Promise<void> {
+    recordHomeConnectFrame(device, message.resource);
     await this.setState(`${device.baseId}.info.lastSeen`, new Date().toISOString(), true);
     await this.setState(`${device.baseId}.info.lastMessage`, JSON.stringify(message), true);
     if (message.resource === "/ci/info" || message.resource === "/iz/info") await writeApplianceInfo(this, device, message.data);
@@ -1059,6 +1169,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     this.updateProgramOptionContextMarker(device, target);
     await this.writeRootProgramAliasValues(device, target, normalizedValue);
     await this.updateStartAvailability(device);
+    if (target.name === POWER_STATE_FEATURE) await this.updateEffectivePowerState(device);
+    if (isHobZoneFeature(target.name)) await this.updateHobActiveZoneStates(device);
     if (isWritable) {
       const numericUid = this.uidStringToNumber(target.uid);
       if (numericUid !== undefined) this.registerWritableState(device, stateId, numericUid, target.name, "value");
@@ -1069,25 +1181,64 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.setState(`${device.baseId}.raw.uid_${target.uid}`, JSON.stringify(value), true);
     }
     if (target.category === "events") await this.updateEventSummary(device);
-    await this.finalizeProgramTelemetryIfFinished(device, target, normalizedValue);
+    await this.finalizeProgramEndDisplayIfFinished(device, target, normalizedValue);
+    await this.clearProgramPhaseDisplayIfIdle(device, target, normalizedValue);
     if (target.name.includes(".Program.") || target.name.includes(".Setting.Favorite.")) await this.updateProgramList(device);
   }
 
 
-  private async finalizeProgramTelemetryIfFinished(device: RunningDevice, target: StateTarget, value: ioBroker.StateValue): Promise<void> {
+  private async finalizeProgramEndDisplayIfFinished(device: RunningDevice, target: StateTarget, value: ioBroker.StateValue): Promise<void> {
     const operationFinished = target.name === OPERATION_STATE_FEATURE && isFinishedOperationState(value);
     const programFinishedEventActive = target.name === PROGRAM_FINISHED_EVENT_FEATURE && isActiveProgramFinishedEventValue(value);
     if (!operationFinished && !programFinishedEventActive) return;
 
-    const targets = finalProgramTelemetryTargets(device.profile, device.baseId);
+    const targets = [...finalProgramEndDisplayTargets(device.profile, device.baseId), ...finalProgramEndCompanionTargets(device.profile, device.baseId)];
     if (targets.length === 0) return;
 
     for (const telemetryTarget of targets) {
-      await this.setState(telemetryTarget.stateId, telemetryTarget.value, true);
+      await this.setStateRespectingObjectType(telemetryTarget.stateId, telemetryTarget.value);
       device.stateValuesByFeature.set(telemetryTarget.feature, telemetryTarget.value);
     }
 
-    this.log.debug(`${device.profile.haId}: finalizing program telemetry after finished state: ProgramProgress=100, RemainingProgramTime=0`);
+    this.log.debug(`${device.profile.haId}: finalizing program end display after finished state: ProgramProgress=100, RemainingProgramTime=0, phases=Finished/Fertig`);
+  }
+
+  private async clearProgramPhaseDisplayIfIdle(device: RunningDevice, target: StateTarget, value: ioBroker.StateValue): Promise<void> {
+    const operationIdle = target.name === OPERATION_STATE_FEATURE && isIdleOperationState(value);
+    const noActiveProgram = target.name === ACTIVE_PROGRAM_FEATURE && isNoActiveProgramValue(value);
+    if (!operationIdle && !noActiveProgram) return;
+    await this.clearProgramPhaseDisplay(device);
+  }
+
+  private async clearProgramPhaseDisplay(device: RunningDevice): Promise<void> {
+    const targets = clearProgramPhaseDisplayTargets(device.profile, device.baseId);
+    if (targets.length === 0) return;
+
+    const currentValuesByFeature = new Map<string, ioBroker.StateValue>();
+    for (const target of targets) {
+      if (device.stateValuesByFeature.has(target.feature)) {
+        currentValuesByFeature.set(target.feature, device.stateValuesByFeature.get(target.feature)!);
+        continue;
+      }
+      const state = await this.getStateAsync(target.stateId);
+      currentValuesByFeature.set(target.feature, state?.val ?? "");
+      device.stateValuesByFeature.set(target.feature, state?.val ?? "");
+    }
+
+    const targetsToClear = nonEmptyClearProgramPhaseDisplayTargets(targets, currentValuesByFeature);
+    if (targetsToClear.length === 0) return;
+
+    for (const phaseTarget of targetsToClear) {
+      await this.setStateRespectingObjectType(phaseTarget.stateId, phaseTarget.value);
+      device.stateValuesByFeature.set(phaseTarget.feature, phaseTarget.value);
+    }
+    this.log.debug(`${device.profile.haId}: clearing program phase display after idle/off state`);
+  }
+
+  private async setStateRespectingObjectType(id: string, value: ioBroker.StateValue): Promise<void> {
+    const object = await this.getObjectAsync(id);
+    const valueToWrite = coerceStateValueForObjectType(value, object?.common?.type);
+    await this.setState(id, valueToWrite, true);
   }
 
   private updateProgramOptionContextMarker(device: RunningDevice, target: StateTarget): void {
@@ -1153,7 +1304,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.ensureStateObject(`${baseId}_raw`, `${target.name} raw`, 0, "value");
     await this.setState(`${baseId}_raw`, Number(target.rawValue), true);
     await this.ensureStateObject(`${baseId}_de`, `${target.name} German`, "", "text");
-    await this.setState(`${baseId}_de`, translateEnumValue(target.name, companionText, target.rawValue), true);
+    await this.setState(`${baseId}_de`, translatedCompanionValueForTarget(target, companionText), true);
   }
 
   private shouldWriteEnumCompanionStates(target: StateTarget): boolean {
@@ -1290,6 +1441,10 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     this.unloaded = true;
     try {
       stopHomeConnectDiscovery();
+      if (this.connectionWatchdogTimer) {
+        clearInterval(this.connectionWatchdogTimer);
+        this.connectionWatchdogTimer = undefined;
+      }
       for (const device of this.devices.values()) {
         if (device.reconnectTimer) clearTimeout(device.reconnectTimer);
         await this.setDeviceConnectionState(device, false);

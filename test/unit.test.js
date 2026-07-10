@@ -1,9 +1,10 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 
-const { translateEnumValue } = require("../build/lib/enumTranslations");
+const { translateEnumValue, translatedCompanionValueForTarget } = require("../build/lib/enumTranslations");
 const { metadataForFeature } = require("../build/lib/stateMetadata");
 const { hasWritableProgramOption } = require("../build/lib/optionWriteability");
+const { activeEventSummaryItems, activeEventSummaryTextDe } = require("../build/lib/eventSummary");
 
 function profileWithProgramOptions(programOptionsByUid) {
   return {
@@ -39,9 +40,15 @@ test("German ProcessPhase enum translations include laundry phases", () => {
 });
 
 test("German enum translations include EndTrigger and FlexStart", () => {
+  assert.equal(translateEnumValue("BSH.Common.Status.ProgramRunDetail.EndTrigger", "ProgramFinished", 0), "Programm normal beendet");
   assert.equal(
     translateEnumValue("BSH.Common.Status.ProgramRunDetail.EndTrigger", "ProgramAbortedByUser", 1),
     "Programm vom Benutzer abgebrochen",
+  );
+  assert.equal(translateEnumValue("BSH.Common.Status.ProgramRunDetail.EndTrigger", "ProgramAbortedByAppliance", 2), "Programm vom Gerät abgebrochen");
+  assert.equal(
+    translateEnumValue("BSH.Common.Status.ProgramRunDetail.EndTrigger", "ProgramAbortedByApplianceCriticalError", 3),
+    "Programm wegen kritischem Gerätefehler abgebrochen",
   );
   assert.equal(
     translateEnumValue("BSH.Common.Status.FlexStart", "Scheduled", 3),
@@ -450,9 +457,17 @@ test("start availability resolves raw numeric values through enum mapping", () =
 });
 
 const {
+  clearProgramPhaseDisplayTargets,
+  coerceStateValueForObjectType,
+  finalProgramEndCompanionTargets,
+  finalProgramEndDisplayTargets,
   finalProgramTelemetryTargets,
   isActiveProgramFinishedEventValue,
   isFinishedOperationState,
+  isIdleOperationState,
+  isNoActiveProgramValue,
+  isOffEffectivePowerState,
+  nonEmptyClearProgramPhaseDisplayTargets,
 } = require("../build/lib/programTelemetryFinalizer");
 
 function telemetryProfile() {
@@ -467,9 +482,10 @@ function telemetryProfile() {
         "0220": "BSH.Common.Option.RemainingProgramTime",
         "0228": "BSH.Common.Status.OperationState",
         "0210": "BSH.Common.Root.ActiveProgram",
+        "0221": "LaundryCare.Common.Option.ProcessPhase",
       },
-      enumTypeByUid: { "0228": "OperationState" },
-      enumValuesByType: { OperationState: { 1: "Run", 2: "Ready", 3: "Running", 6: "Finished" } },
+      enumTypeByUid: { "0228": "OperationState", "0221": "ProcessPhase" },
+      enumValuesByType: { OperationState: { 1: "Run", 2: "Ready", 3: "Running", 6: "Finished" }, ProcessPhase: { 5: "Washing", 21: "Drying" } },
       programOptionsByUid: {},
     },
   };
@@ -534,4 +550,584 @@ test("ActiveProgram zero is not a final telemetry target", () => {
 
 test("final program telemetry targets do not include raw states", () => {
   assert.equal(finalProgramTelemetryTargets(telemetryProfile(), "appliance").some(target => target.stateId.includes(".raw.")), false);
+});
+
+
+function dishwasherTelemetryProfile() {
+  return {
+    ...telemetryProfile(),
+    type: "Dishwasher",
+    featureMapping: {
+      ...telemetryProfile().featureMapping,
+      featuresByUid: {
+        ...telemetryProfile().featureMapping.featuresByUid,
+        "0301": "Dishcare.Dishwasher.Status.ProgramPhase",
+      },
+      enumTypeByUid: { ...telemetryProfile().featureMapping.enumTypeByUid, "0301": "ProgramPhase" },
+      enumValuesByType: { ...telemetryProfile().featureMapping.enumValuesByType, ProgramPhase: { 1: "MainWash", 2: "Drying" } },
+    },
+  };
+}
+
+test("final program end display targets include ProcessPhase and German companion but no raw states", () => {
+  assert.deepEqual(finalProgramEndDisplayTargets(telemetryProfile(), "appliance"), [
+    { feature: "BSH.Common.Option.ProgramProgress", value: 100, stateId: "appliance.options.ProgramProgress" },
+    { feature: "BSH.Common.Option.RemainingProgramTime", value: 0, stateId: "appliance.options.RemainingProgramTime" },
+    { feature: "LaundryCare.Common.Option.ProcessPhase", value: "Finished", stateId: "appliance.phases.ProcessPhase" },
+  ]);
+  assert.deepEqual(finalProgramEndCompanionTargets(telemetryProfile(), "appliance"), [
+    { feature: "LaundryCare.Common.Option.ProcessPhase_de", value: "Fertig", stateId: "appliance.phases.ProcessPhase_de" },
+  ]);
+  assert.equal(finalProgramEndDisplayTargets(telemetryProfile(), "appliance").some(target => target.stateId.includes(".raw.") || target.stateId.endsWith("_raw")), false);
+  assert.equal(finalProgramEndCompanionTargets(telemetryProfile(), "appliance").some(target => target.stateId.includes(".raw.") || target.stateId.endsWith("_raw")), false);
+});
+
+test("final program end display targets include dishwasher ProgramPhase when profile has it", () => {
+  assert.equal(finalProgramEndDisplayTargets(dishwasherTelemetryProfile(), "appliance").some(target => target.stateId === "appliance.phases.ProgramPhase" && target.value === "Finished"), true);
+  assert.equal(finalProgramEndCompanionTargets(dishwasherTelemetryProfile(), "appliance").some(target => target.stateId === "appliance.phases.ProgramPhase_de" && target.value === "Fertig"), true);
+});
+
+test("final program end display targets skip phases when profile has no phase feature", () => {
+  const profile = telemetryProfile();
+  delete profile.featureMapping.featuresByUid["0221"];
+  assert.deepEqual(finalProgramEndDisplayTargets(profile, "appliance").map(target => target.stateId), [
+    "appliance.options.ProgramProgress",
+    "appliance.options.RemainingProgramTime",
+  ]);
+  assert.deepEqual(finalProgramEndCompanionTargets(profile, "appliance"), []);
+});
+
+test("real phase values map normally and running states are not final states", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  const mapper = new StateMapper(telemetryProfile());
+  assert.deepEqual(mapper.toStateTarget({ uid: "0221", value: 5 }), {
+    id: "phases.ProcessPhase",
+    name: "LaundryCare.Common.Option.ProcessPhase",
+    value: "Washing",
+    rawValue: 5,
+    category: "phases",
+    uid: "0221",
+  });
+  assert.equal(isFinishedOperationState("Run"), false);
+  assert.equal(isFinishedOperationState("Running"), false);
+});
+
+
+test("Laundry Dryer ProcessPhase idle/no-phase values clear display value but keep raw value", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  const profile = telemetryProfile();
+  profile.featureMapping.featuresByUid["0221"] = "LaundryCare.Dryer.Option.ProcessPhase";
+  profile.featureMapping.enumValuesByType.ProcessPhase[0] = "NoPhase";
+  const mapper = new StateMapper(profile);
+
+  for (const rawValue of [0, "NoPhase", "No Phase", "Keine Phase", "LaundryCare.Dryer.Option.ProcessPhase.NoPhase"]) {
+    assert.deepEqual(mapper.toStateTarget({ uid: "0221", value: rawValue }), {
+      id: "phases.ProcessPhase",
+      name: "LaundryCare.Dryer.Option.ProcessPhase",
+      value: "",
+      rawValue,
+      category: "phases",
+      uid: "0221",
+    });
+  }
+});
+
+test("translated companion values stay empty for intentionally cleared ProcessPhase targets", () => {
+  const cases = [
+    { name: "LaundryCare.Dryer.Option.ProcessPhase", value: "", rawValue: 0, enumText: "NoPhase" },
+    { name: "LaundryCare.Dryer.Option.ProcessPhase", value: "", rawValue: "NoPhase", enumText: "NoPhase" },
+    { name: "LaundryCare.Dryer.Option.ProcessPhase", value: "", rawValue: "Keine Phase", enumText: "Keine Phase" },
+    { name: "LaundryCare.Common.Option.ProcessPhase", value: "", rawValue: 255, enumText: "NoPhase" },
+  ];
+
+  for (const item of cases) {
+    const target = {
+      id: "phases.ProcessPhase",
+      name: item.name,
+      value: item.value,
+      rawValue: item.rawValue,
+      category: "phases",
+      uid: "0221",
+    };
+    assert.equal(translatedCompanionValueForTarget(target, item.enumText), "");
+    assert.equal(target.rawValue, item.rawValue);
+  }
+});
+
+test("translated companion values keep real and finished ProcessPhase translations", () => {
+  const dryingTarget = {
+    id: "phases.ProcessPhase",
+    name: "LaundryCare.Dryer.Option.ProcessPhase",
+    value: "Drying",
+    rawValue: 21,
+    category: "phases",
+    uid: "0221",
+  };
+  const finishedTarget = { ...dryingTarget, value: "Finished", rawValue: 6 };
+
+  assert.equal(translatedCompanionValueForTarget(dryingTarget, "Drying"), "Trocknen");
+  assert.equal(translatedCompanionValueForTarget(finishedTarget, "Finished"), "Fertig");
+  assert.equal(dryingTarget.rawValue, 21);
+});
+
+test("Laundry Dryer ProcessPhase real phase values map normally and keep raw companion input", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  const profile = telemetryProfile();
+  profile.featureMapping.featuresByUid["0221"] = "LaundryCare.Dryer.Option.ProcessPhase";
+  const mapper = new StateMapper(profile);
+  const target = mapper.toStateTarget({ uid: "0221", value: 21 });
+
+  assert.deepEqual(target, {
+    id: "phases.ProcessPhase",
+    name: "LaundryCare.Dryer.Option.ProcessPhase",
+    value: "Drying",
+    rawValue: 21,
+    category: "phases",
+    uid: "0221",
+  });
+  assert.equal(translateEnumValue(target.name, String(target.value), target.rawValue), "Trocknen");
+});
+
+
+test("Laundry ProcessPhase raw 255 clears display value but keeps raw value", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  for (const feature of ["LaundryCare.Common.Option.ProcessPhase", "LaundryCare.Dryer.Option.ProcessPhase"]) {
+    const profile = telemetryProfile();
+    profile.featureMapping.featuresByUid["0221"] = feature;
+    const mapper = new StateMapper(profile);
+    assert.deepEqual(mapper.toStateTarget({ uid: "0221", value: 255 }), {
+      id: "phases.ProcessPhase",
+      name: feature,
+      value: "",
+      rawValue: 255,
+      category: "phases",
+      uid: "0221",
+    });
+  }
+});
+
+test("Laundry ProcessPhase raw 255 does not clear raw companion input", () => {
+  const { StateMapper } = require("../build/lib/stateMapper");
+  const mapper = new StateMapper(telemetryProfile());
+  const target = mapper.toStateTarget({ uid: "0221", value: 255 });
+  assert.equal(target.value, "");
+  assert.equal(target.rawValue, 255);
+  assert.equal(target.id, "phases.ProcessPhase");
+  assert.equal(translateEnumValue(target.name, String(target.value), target.rawValue), "");
+});
+
+
+test("idle/off program end signals clear displayed phases", () => {
+  assert.deepEqual(clearProgramPhaseDisplayTargets(telemetryProfile(), "appliance"), [
+    { feature: "LaundryCare.Common.Option.ProcessPhase", value: "", stateId: "appliance.phases.ProcessPhase" },
+    { feature: "LaundryCare.Common.Option.ProcessPhase_de", value: "", stateId: "appliance.phases.ProcessPhase_de" },
+  ]);
+  assert.equal(isIdleOperationState("Ready"), true);
+  assert.equal(isIdleOperationState("Off"), true);
+  assert.equal(isIdleOperationState("Inactive"), true);
+  assert.equal(isIdleOperationState("Running"), false);
+  assert.equal(isNoActiveProgramValue(0), true);
+  assert.equal(isNoActiveProgramValue("0"), true);
+  assert.equal(isNoActiveProgramValue("Dishcare.Dishwasher.Program.Intensiv70"), false);
+  assert.equal(isOffEffectivePowerState("Offline"), true);
+  assert.equal(isOffEffectivePowerState("Off"), true);
+  assert.equal(isOffEffectivePowerState("MainsOff"), true);
+  assert.equal(isOffEffectivePowerState("Standby"), false);
+});
+
+test("clear phase targets include dishwasher ProgramPhase and German companion but no raw states", () => {
+  assert.deepEqual(clearProgramPhaseDisplayTargets(dishwasherTelemetryProfile(), "appliance").filter(target => target.stateId.includes("ProgramPhase")), [
+    { feature: "Dishcare.Dishwasher.Status.ProgramPhase", value: "", stateId: "appliance.phases.ProgramPhase" },
+    { feature: "Dishcare.Dishwasher.Status.ProgramPhase_de", value: "", stateId: "appliance.phases.ProgramPhase_de" },
+  ]);
+  assert.equal(clearProgramPhaseDisplayTargets(dishwasherTelemetryProfile(), "appliance").some(target => target.stateId.includes(".raw.") || target.stateId.endsWith("_raw")), false);
+});
+
+
+test("clear phase targets only select non-empty display values", () => {
+  const targets = clearProgramPhaseDisplayTargets(telemetryProfile(), "appliance");
+  const currentValues = new Map([
+    ["LaundryCare.Common.Option.ProcessPhase", "Finished"],
+    ["LaundryCare.Common.Option.ProcessPhase_de", "Fertig"],
+    ["LaundryCare.Common.Option.ProcessPhase_raw", 255],
+  ]);
+
+  assert.deepEqual(nonEmptyClearProgramPhaseDisplayTargets(targets, currentValues), targets);
+  assert.equal(targets.some(target => target.stateId.includes(".raw.") || target.stateId.endsWith("_raw")), false);
+});
+
+test("clear phase targets do not select already empty display values", () => {
+  const targets = clearProgramPhaseDisplayTargets(telemetryProfile(), "appliance");
+  const currentValues = new Map([
+    ["LaundryCare.Common.Option.ProcessPhase", ""],
+    ["LaundryCare.Common.Option.ProcessPhase_de", ""],
+    ["LaundryCare.Common.Option.ProcessPhase_raw", 255],
+  ]);
+
+  assert.deepEqual(nonEmptyClearProgramPhaseDisplayTargets(targets, currentValues), []);
+  assert.equal(currentValues.get("LaundryCare.Common.Option.ProcessPhase_raw"), 255);
+});
+
+test("repeated idle/off clear only writes phase display targets once", () => {
+  const targets = clearProgramPhaseDisplayTargets(telemetryProfile(), "appliance");
+  const currentValues = new Map([
+    ["LaundryCare.Common.Option.ProcessPhase", "Finished"],
+    ["LaundryCare.Common.Option.ProcessPhase_de", "Fertig"],
+  ]);
+  const firstTargets = nonEmptyClearProgramPhaseDisplayTargets(targets, currentValues);
+  for (const target of firstTargets) currentValues.set(target.feature, target.value);
+
+  assert.deepEqual(firstTargets, targets);
+  assert.deepEqual(nonEmptyClearProgramPhaseDisplayTargets(targets, currentValues), []);
+});
+
+test("finalized telemetry values respect object types", () => {
+  assert.equal(coerceStateValueForObjectType(0, "number"), 0);
+  assert.equal(coerceStateValueForObjectType(0, "string"), "0");
+  assert.equal(coerceStateValueForObjectType(100, "number"), 100);
+  assert.equal(coerceStateValueForObjectType(100, "string"), "100");
+  assert.equal(coerceStateValueForObjectType(0, undefined), 0);
+});
+
+test("ProgramAborted event summary text is neutral", () => {
+  const items = activeEventSummaryItems(new Map([["BSH.Common.Event.ProgramAborted", "Present"]]));
+  assert.equal(activeEventSummaryTextDe(items), "Abbruchmeldung offen");
+});
+
+const { parseMessage } = require("../build/lib/message");
+const { parseRepairedAllMandatoryValuesResponse } = require("../build/lib/client");
+const { calculateIdleSeconds, recordHomeConnectFrame, shouldHeartbeatDevice, WATCHDOG_HEARTBEAT_REQUEST } = require("../build/lib/runtimeTypes");
+
+function watchdogDevice(overrides = {}) {
+  return {
+    connected: true,
+    reconnecting: false,
+    client: { sendSync: async () => ({ resource: "/ni/info", version: 1, action: "RESPONSE" }) },
+    ...overrides,
+  };
+}
+
+test("watchdog timestamps are updated for every frame and RO frames", () => {
+  const device = watchdogDevice();
+  recordHomeConnectFrame(device, "/ni/info", 1000);
+  assert.equal(device.lastRxAt, 1000);
+  assert.equal(device.lastRoRxAt, undefined);
+  recordHomeConnectFrame(device, "/ro/values", 2000);
+  assert.equal(device.lastRxAt, 2000);
+  assert.equal(device.lastRoRxAt, 2000);
+  recordHomeConnectFrame(device, "/ro/descriptionChange", 3000);
+  assert.equal(device.lastRoRxAt, 3000);
+  recordHomeConnectFrame(device, "/ro/allMandatoryValues", 4000);
+  assert.equal(device.lastRoRxAt, 4000);
+});
+
+test("watchdog skips fresh idle devices and unloaded/disconnected style states", () => {
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ lastRxAt: 1_000 }), 60_000), false);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ connected: false, lastRxAt: 1_000 }), 400_000), false);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ reconnecting: true, lastRxAt: 1_000 }), 400_000), false);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ watchdogHeartbeatInFlight: true, lastRxAt: 1_000 }), 400_000), false);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ client: undefined, lastRxAt: 1_000 }), 400_000), false);
+});
+
+test("watchdog requests heartbeat when last traffic is too old", () => {
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ lastRxAt: 1_000 }), 301_000), false);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ lastRxAt: 1_000 }), 601_000), true);
+});
+
+
+test("watchdog heartbeat request uses /ni/info version 1", () => {
+  assert.deepEqual(WATCHDOG_HEARTBEAT_REQUEST, { resource: "/ni/info", version: 1, action: "GET" });
+  assert.notDeepEqual(WATCHDOG_HEARTBEAT_REQUEST, { resource: "/ci/services", version: 3, action: "GET" });
+});
+
+test("watchdog idle seconds are calculated before heartbeat response updates lastRxAt and never negative", () => {
+  const device = watchdogDevice({ lastRxAt: 1_000 });
+  const idleSeconds = calculateIdleSeconds(device.lastRxAt, 301_000);
+  recordHomeConnectFrame(device, WATCHDOG_HEARTBEAT_REQUEST.resource, 302_000);
+  assert.equal(idleSeconds, 300);
+  assert.equal(calculateIdleSeconds(device.lastRxAt, 301_000), 0);
+});
+
+test("watchdog idle seconds for Home Connect error responses are clamped to zero", () => {
+  const device = watchdogDevice({ lastRxAt: 301_500 });
+  recordHomeConnectFrame(device, WATCHDOG_HEARTBEAT_REQUEST.resource, 302_000);
+  const error = new Error(`Home Connect response code 404 (Not found) for ${WATCHDOG_HEARTBEAT_REQUEST.resource}`);
+  assert.equal(error.message.includes("404"), true);
+  assert.equal(calculateIdleSeconds(device.lastRxAt, 301_000), 0);
+});
+
+test("watchdog heartbeat success does not imply reconnect condition", async () => {
+  let heartbeatCalls = 0;
+  const device = watchdogDevice({
+    lastRxAt: 1_000,
+    client: { sendSync: async () => { heartbeatCalls += 1; return { resource: "/ni/info", version: 1, action: "RESPONSE" }; } },
+  });
+  assert.equal(shouldHeartbeatDevice(device, 601_000), true);
+  await device.client.sendSync(WATCHDOG_HEARTBEAT_REQUEST);
+  recordHomeConnectFrame(device, WATCHDOG_HEARTBEAT_REQUEST.resource, 601_000);
+  assert.equal(heartbeatCalls, 1);
+  assert.equal(shouldHeartbeatDevice(device, 601_001), false);
+});
+
+test("watchdog heartbeat failure can be guarded to exactly one reconnect", async () => {
+  let reconnects = 0;
+  const device = watchdogDevice({
+    lastRxAt: 1_000,
+    watchdogHeartbeatInFlight: false,
+    client: { sendSync: async () => { throw new Error("timeout"); } },
+  });
+  if (shouldHeartbeatDevice(device, 601_000)) {
+    device.watchdogHeartbeatInFlight = true;
+    try { await device.client.sendSync(WATCHDOG_HEARTBEAT_REQUEST); }
+    catch { reconnects += 1; device.reconnecting = true; }
+    finally { device.watchdogHeartbeatInFlight = false; }
+  }
+  assert.equal(reconnects, 1);
+  assert.equal(shouldHeartbeatDevice(device, 302_000), false);
+});
+
+test("watchdog interval guard prevents duplicate intervals", () => {
+  const state = { timer: undefined, starts: 0 };
+  function start() {
+    if (state.timer) return;
+    state.starts += 1;
+    state.timer = setInterval(() => {}, 60_000);
+  }
+  start();
+  start();
+  clearInterval(state.timer);
+  assert.equal(state.starts, 1);
+});
+
+test("unload-style connected flag prevents further watchdog actions", () => {
+  const device = watchdogDevice({ lastRxAt: 1_000 });
+  assert.equal(shouldHeartbeatDevice(device, 601_000), true);
+  device.connected = false;
+  assert.equal(shouldHeartbeatDevice(device, 602_000), false);
+});
+
+function allMandatoryPayload(dataSuffix, resource = "/ro/allMandatoryValues") {
+  return `{"sID":1,"msgID":7,"resource":"${resource}","version":1,"action":"RESPONSE","data":[${dataSuffix}}`;
+}
+
+test("truncated allMandatoryValues response is repaired and parsed", () => {
+  const payload = allMandatoryPayload('{"uid":100,"value":1},{"uid":8334,"value":0}');
+  const repaired = parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("Expected ',' or ']' after array element"));
+  assert.equal(repaired.resource, "/ro/allMandatoryValues");
+  assert.deepEqual(repaired.data.map(item => item.uid), [100, 8334]);
+});
+
+test("valid allMandatoryValues response remains valid without repair", () => {
+  const payload = '{"sID":1,"msgID":7,"resource":"/ro/allMandatoryValues","version":1,"action":"RESPONSE","data":[{"uid":100,"value":1}]}';
+  assert.deepEqual(parseMessage(payload).data, [{ uid: 100, value: 1 }]);
+  assert.equal(parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("unused")), undefined);
+});
+
+test("malformed response for other resources is not repaired", () => {
+  const payload = allMandatoryPayload('{"uid":100,"value":1}', "/ro/values");
+  assert.equal(parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("Expected ',' or ']' after array element")), undefined);
+});
+
+test("strongly broken allMandatoryValues response is not repaired", () => {
+  const payload = '{"sID":1,"msgID":7,"resource":"/ro/allMandatoryValues","version":1,"action":"RESPONSE","data":[{"uid":100,"value":';
+  assert.equal(parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("Unexpected end of JSON input")), undefined);
+});
+
+test("malformed allMandatoryValues retry classification remains available", () => {
+  const payload = allMandatoryPayload('{"uid":100,"value":1');
+  const repaired = parseRepairedAllMandatoryValuesResponse(payload, new SyntaxError("Expected ',' or ']' after array element"));
+  assert.equal(repaired, undefined);
+  assert.throws(() => parseMessage(payload), SyntaxError);
+});
+
+function effectivePowerDevice(overrides = {}) {
+  return {
+    connected: true,
+    stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "On"]]),
+    rawValuesByFeature: new Map([["BSH.Common.Setting.PowerState", 2]]),
+    profile: {
+      featureMapping: {
+        featuresByUid: { "0103": "BSH.Common.Setting.PowerState" },
+        enumTypeByUid: { "0103": "PowerState" },
+        enumValuesByType: { PowerState: { 1: "Off", 2: "On", 3: "MainsOff", 4: "Standby" } },
+        programOptionsByUid: {},
+      },
+    },
+    ...overrides,
+  };
+}
+
+test("effective power state reports disconnected devices as offline without changing stored values", () => {
+  const { evaluateEffectivePowerState } = require("../build/lib/effectivePowerState");
+  const device = effectivePowerDevice({ connected: false });
+  const stateValuesBefore = new Map(device.stateValuesByFeature);
+  const rawValuesBefore = new Map(device.rawValuesByFeature);
+  assert.deepEqual(evaluateEffectivePowerState(device), {
+    effectivePowerState: "Offline",
+    effectivePowerStateDe: "Aus / offline",
+    isEffectivelyOn: false,
+  });
+  assert.deepEqual(device.stateValuesByFeature, stateValuesBefore);
+  assert.deepEqual(device.rawValuesByFeature, rawValuesBefore);
+});
+
+test("effective power state maps connected known power states", () => {
+  const { evaluateEffectivePowerState } = require("../build/lib/effectivePowerState");
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "On"]]) })).isEffectivelyOn, true);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "MainsOff"]]) })).isEffectivelyOn, false);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "Off"]]) })).isEffectivelyOn, false);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "BSH.Common.EnumType.PowerState.Off"]]) })).isEffectivelyOn, false);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "PowerState.Off"]]) })).isEffectivelyOn, false);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "BSH.Common.EnumType.PowerState.MainsOff"]]) })).isEffectivelyOn, false);
+  assert.equal(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "BSH.Common.EnumType.PowerState.On"]]) })).isEffectivelyOn, true);
+  assert.deepEqual(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", "Standby"]]) })), {
+    effectivePowerState: "Standby",
+    effectivePowerStateDe: "Standby",
+    isEffectivelyOn: true,
+  });
+});
+
+test("effective power state resolves numeric PowerState through enum mapping", () => {
+  const { evaluateEffectivePowerState } = require("../build/lib/effectivePowerState");
+  assert.deepEqual(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map(), rawValuesByFeature: new Map([["BSH.Common.Setting.PowerState", 3]]) })), {
+    effectivePowerState: "MainsOff",
+    effectivePowerStateDe: "Aus",
+    isEffectivelyOn: false,
+  });
+  assert.deepEqual(evaluateEffectivePowerState(effectivePowerDevice({ stateValuesByFeature: new Map([["BSH.Common.Setting.PowerState", 1]]) })), {
+    effectivePowerState: "Off",
+    effectivePowerStateDe: "Aus",
+    isEffectivelyOn: false,
+  });
+});
+
+function hobZoneDevice(entries, rawEntries = []) {
+  return {
+    stateValuesByFeature: new Map(entries),
+    rawValuesByFeature: new Map(rawEntries),
+  };
+}
+
+function hobFeature(zone, field) {
+  return `Cooking.Hob.Status.Zone.${zone}.${field}`;
+}
+
+test("hob active zone summary treats ActiveProgram with zero PowerLevel as active", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("120", "ActiveProgram"), 12289],
+    [hobFeature("120", "PowerLevel"), 0],
+  ]));
+  assert.equal(summary.activeZones.length, 1);
+  assert.equal(summary.activeZones[0].zone, "120");
+  assert.equal(summary.activeZones[0].activeProgram, 12289);
+  assert.equal(summary.activeZones[0].powerLevel, 0);
+});
+
+test("hob active zone summary ignores default ActiveProgram when zone is explicitly off and ready", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  for (const activeProgram of ["Cooking.Hob.Program.PowerLevelMode", 12289]) {
+    const summary = evaluateHobZoneSummary(hobZoneDevice([
+      [hobFeature("100", "State"), "Off"],
+      [hobFeature("100", "OperationState"), "Ready"],
+      [hobFeature("100", "PowerLevel"), "Off"],
+      [hobFeature("100", "ActiveProgram"), activeProgram],
+    ]));
+    assert.equal(summary.activeZones.length, 0);
+  }
+});
+
+test("hob active zone summary treats State Active as active despite default ActiveProgram and off PowerLevel", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("120", "State"), "Active"],
+    [hobFeature("120", "ActiveProgram"), "Cooking.Hob.Program.PowerLevelMode"],
+    [hobFeature("120", "PowerLevel"), "Off"],
+  ]));
+  assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["120"]);
+});
+
+test("hob active zone summary treats active OperationState as active with off PowerLevel", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("130", "OperationState"), "Active"],
+    [hobFeature("130", "PowerLevel"), "Off"],
+  ]));
+  assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["130"]);
+});
+
+test("hob active zone summary treats positive PowerLevel as active", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([[hobFeature("340", "PowerLevel"), 5]]));
+  assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["340"]);
+});
+
+test("hob active zone summary treats State Active as active", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([[hobFeature("560", "State"), "Active"]]));
+  assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["560"]);
+});
+
+test("hob active zone summary treats active OperationState values as active", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  for (const operationState of ["Active", "Run", "Running", "On", 1]) {
+    const summary = evaluateHobZoneSummary(hobZoneDevice([[hobFeature("780", "OperationState"), operationState]]));
+    assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["780"]);
+  }
+});
+
+test("hob active zone summary can use raw numeric OperationState enum value", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice(
+    [[hobFeature("901", "OperationState"), "Unknown(1)"]],
+    [[hobFeature("901", "OperationState"), 1]],
+  ));
+  assert.deepEqual(summary.activeZones.map(zone => zone.zone), ["901"]);
+});
+
+test("hob inactive zone states are not active", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const offSummary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("120", "State"), "Off"],
+    [hobFeature("120", "ActiveProgram"), 0],
+    [hobFeature("120", "PowerLevel"), 0],
+  ]));
+  const notSelectableSummary = evaluateHobZoneSummary(hobZoneDevice([[hobFeature("340", "State"), "NotSelectable"]]));
+  assert.equal(offSummary.activeZones.length, 0);
+  assert.equal(notSelectableSummary.activeZones.length, 0);
+});
+
+test("hob residual heat zones are not active but are reported separately", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const summary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("120", "State"), "ResidualHeat"],
+    [hobFeature("340", "State"), "ResiduelHeat"],
+  ]));
+  assert.equal(summary.activeZones.length, 0);
+  assert.deepEqual(summary.residualHeatZones.map(zone => zone.zone), ["120", "340"]);
+  assert.equal(summary.residualHeatZonesText, "120, 340");
+});
+
+test("hob active zone summary exposes boolean, JSON, and text friendly values", () => {
+  const { evaluateHobZoneSummary } = require("../build/lib/hobActiveZones");
+  const activeSummary = evaluateHobZoneSummary(hobZoneDevice([
+    [hobFeature("340", "PowerLevel"), 3],
+    [hobFeature("120", "ActiveProgram"), 12289],
+    [hobFeature("120", "PowerLevel"), 0],
+  ]));
+  const inactiveSummary = evaluateHobZoneSummary(hobZoneDevice([[hobFeature("560", "State"), "Off"]]));
+  assert.equal(activeSummary.activeZones.length > 0, true);
+  assert.equal(activeSummary.activeZonesText, "120, 340");
+  assert.equal(JSON.parse(JSON.stringify(activeSummary.activeZones))[0].zone, "120");
+  assert.equal(inactiveSummary.activeZones.length > 0, false);
+  assert.equal(inactiveSummary.activeZonesText, "");
+});
+
+test("hob zone feature detection is generic and not UID based", () => {
+  const { isHobZoneFeature } = require("../build/lib/hobActiveZones");
+  assert.equal(isHobZoneFeature(hobFeature("120", "State")), true);
+  assert.equal(isHobZoneFeature(hobFeature("120", "OperationState")), true);
+  assert.equal(isHobZoneFeature(hobFeature("120", "ActiveProgram")), true);
+  assert.equal(isHobZoneFeature(hobFeature("120", "PowerLevel")), true);
+  assert.equal(isHobZoneFeature("Cooking.Hob.Status.Zone.120.Temperature"), false);
 });

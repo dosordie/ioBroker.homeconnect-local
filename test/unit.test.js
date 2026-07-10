@@ -715,7 +715,8 @@ test("watchdog skips fresh idle devices and unloaded/disconnected style states",
 });
 
 test("watchdog requests heartbeat when last traffic is too old", () => {
-  assert.equal(shouldHeartbeatDevice(watchdogDevice({ lastRxAt: 1_000 }), 301_000), true);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ lastRxAt: 1_000 }), 301_000), false);
+  assert.equal(shouldHeartbeatDevice(watchdogDevice({ lastRxAt: 1_000 }), 601_000), true);
 });
 
 
@@ -746,11 +747,11 @@ test("watchdog heartbeat success does not imply reconnect condition", async () =
     lastRxAt: 1_000,
     client: { sendSync: async () => { heartbeatCalls += 1; return { resource: "/ni/info", version: 1, action: "RESPONSE" }; } },
   });
-  assert.equal(shouldHeartbeatDevice(device, 301_000), true);
+  assert.equal(shouldHeartbeatDevice(device, 601_000), true);
   await device.client.sendSync(WATCHDOG_HEARTBEAT_REQUEST);
-  recordHomeConnectFrame(device, WATCHDOG_HEARTBEAT_REQUEST.resource, 301_000);
+  recordHomeConnectFrame(device, WATCHDOG_HEARTBEAT_REQUEST.resource, 601_000);
   assert.equal(heartbeatCalls, 1);
-  assert.equal(shouldHeartbeatDevice(device, 301_001), false);
+  assert.equal(shouldHeartbeatDevice(device, 601_001), false);
 });
 
 test("watchdog heartbeat failure can be guarded to exactly one reconnect", async () => {
@@ -760,7 +761,7 @@ test("watchdog heartbeat failure can be guarded to exactly one reconnect", async
     watchdogHeartbeatInFlight: false,
     client: { sendSync: async () => { throw new Error("timeout"); } },
   });
-  if (shouldHeartbeatDevice(device, 301_000)) {
+  if (shouldHeartbeatDevice(device, 601_000)) {
     device.watchdogHeartbeatInFlight = true;
     try { await device.client.sendSync(WATCHDOG_HEARTBEAT_REQUEST); }
     catch { reconnects += 1; device.reconnecting = true; }
@@ -785,9 +786,9 @@ test("watchdog interval guard prevents duplicate intervals", () => {
 
 test("unload-style connected flag prevents further watchdog actions", () => {
   const device = watchdogDevice({ lastRxAt: 1_000 });
-  assert.equal(shouldHeartbeatDevice(device, 301_000), true);
+  assert.equal(shouldHeartbeatDevice(device, 601_000), true);
   device.connected = false;
-  assert.equal(shouldHeartbeatDevice(device, 302_000), false);
+  assert.equal(shouldHeartbeatDevice(device, 602_000), false);
 });
 
 function allMandatoryPayload(dataSuffix, resource = "/ro/allMandatoryValues") {

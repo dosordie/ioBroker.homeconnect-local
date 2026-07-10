@@ -118,6 +118,7 @@
     "appName": "ioBroker HomeConnect Local",
     "appId": "iobroker-homeconnect-local",
     "reconnectInterval": 30,
+    "watchdogHeartbeatIdleMinutes": 10,
     "debugRaw": false,
     "autoAddProfiles": true,
     "devices": [],

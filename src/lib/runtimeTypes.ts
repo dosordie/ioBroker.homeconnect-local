@@ -3,6 +3,7 @@ import { StateMapper } from "./stateMapper";
 import { ApplianceProfile, ConfiguredDevice, HcMessage } from "./types";
 
 export const WATCHDOG_HEARTBEAT_REQUEST: HcMessage = { resource: "/ni/info", version: 1, action: "GET" };
+export const DEFAULT_WATCHDOG_HEARTBEAT_IDLE_MS = 10 * 60 * 1000;
 
 export function calculateIdleSeconds(lastRxAt: number | undefined, now = Date.now()): number {
   const effectiveLastRxAt = lastRxAt ?? now;
@@ -41,7 +42,7 @@ export function recordHomeConnectFrame(device: RunningDevice, resource?: string,
   }
 }
 
-export function shouldHeartbeatDevice(device: RunningDevice, now = Date.now(), maxIdleMs = 5 * 60 * 1000): boolean {
+export function shouldHeartbeatDevice(device: RunningDevice, now = Date.now(), maxIdleMs = DEFAULT_WATCHDOG_HEARTBEAT_IDLE_MS): boolean {
   if (!device.connected || device.reconnecting || device.watchdogHeartbeatInFlight || !device.client) return false;
   const lastRxAt = device.lastRxAt ?? now;
   return now - lastRxAt >= maxIdleMs;

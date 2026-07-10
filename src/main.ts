@@ -22,7 +22,7 @@ import { loadProfiles } from "./lib/profile";
 import { DiscoveredHomeConnectDevice, DiscoveryProfileMatch, matchDiscoveredDeviceToProfile, startHomeConnectDiscovery, stopHomeConnectDiscovery } from "./lib/mdnsDiscovery";
 import { DiscoveryDeviceAdded, DiscoveryDeviceEnabled, DiscoveryHostUpdate, addOrEnableConfiguredDevicesFromDiscovery, updateConfiguredDeviceHostsFromDiscovery } from "./lib/discoveryConfigUpdate";
 import { connectionFailureLogLevel, connectionFailureLogMessage } from "./lib/reconnectPolicy";
-import { calculateIdleSeconds, recordHomeConnectFrame, RunningDevice, shouldHeartbeatDevice, WATCHDOG_HEARTBEAT_REQUEST, WritableState } from "./lib/runtimeTypes";
+import { calculateIdleSeconds, DEFAULT_WATCHDOG_HEARTBEAT_IDLE_MS, recordHomeConnectFrame, RunningDevice, shouldHeartbeatDevice, WATCHDOG_HEARTBEAT_REQUEST, WritableState } from "./lib/runtimeTypes";
 import { StateMapper } from "./lib/stateMapper";
 import { activeEventSummaryItems, activeEventSummaryTextDe } from "./lib/eventSummary";
 import { clearProgramPhaseDisplayTargets, coerceStateValueForObjectType, finalProgramEndCompanionTargets, finalProgramEndDisplayTargets, isActiveProgramFinishedEventValue, isFinishedOperationState, isIdleOperationState, isNoActiveProgramValue, isOffEffectivePowerState, OPERATION_STATE_FEATURE, PROGRAM_FINISHED_EVENT_FEATURE } from "./lib/programTelemetryFinalizer";
@@ -1036,13 +1036,24 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private async runConnectionWatchdog(now = Date.now()): Promise<void> {
     if (this.unloaded) return;
     for (const device of this.devices.values()) {
-      if (!shouldHeartbeatDevice(device, now)) continue;
+      if (!this.shouldHeartbeatDevice(device, now)) continue;
       await this.checkDeviceHeartbeat(device, now);
     }
   }
 
+
+  private shouldHeartbeatDevice(device: RunningDevice, now = Date.now()): boolean {
+    return shouldHeartbeatDevice(device, now, this.watchdogHeartbeatIdleMs());
+  }
+
+  private watchdogHeartbeatIdleMs(): number {
+    const configuredMinutes = Number(this.currentConfig.watchdogHeartbeatIdleMinutes ?? DEFAULT_WATCHDOG_HEARTBEAT_IDLE_MS / 60_000);
+    const effectiveMinutes = Number.isFinite(configuredMinutes) ? Math.max(1, configuredMinutes) : DEFAULT_WATCHDOG_HEARTBEAT_IDLE_MS / 60_000;
+    return effectiveMinutes * 60_000;
+  }
+
   private async checkDeviceHeartbeat(device: RunningDevice, now = Date.now()): Promise<void> {
-    if (this.unloaded || !shouldHeartbeatDevice(device, now)) return;
+    if (this.unloaded || !this.shouldHeartbeatDevice(device, now)) return;
     const client = device.client;
     if (!client) return;
     const idleSeconds = calculateIdleSeconds(device.lastRxAt, now);

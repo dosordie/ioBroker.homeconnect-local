@@ -17,6 +17,7 @@ export interface HomeConnectClientOptions {
   appName: string;
   appId: string;
   log?: Pick<ioBroker.Logger, "debug" | "info" | "warn" | "error">;
+  deviceLabel?: string;
   messageHandler?: (message: HcMessage) => Promise<void> | void;
   frameHandler?: (message: HcMessage) => void;
   closeHandler?: (error?: Error) => void;
@@ -32,6 +33,7 @@ export class HomeConnectClient {
   private readonly appName: string;
   private readonly appId: string;
   private readonly log?: HomeConnectClientOptions["log"];
+  private readonly deviceLabel?: string;
   private readonly messageHandler?: HomeConnectClientOptions["messageHandler"];
   private readonly frameHandler?: HomeConnectClientOptions["frameHandler"];
   private readonly closeHandler?: HomeConnectClientOptions["closeHandler"];
@@ -41,12 +43,17 @@ export class HomeConnectClient {
   private sid?: number;
   private lastMsgId?: number;
   private connected = false;
+  private socketHandlersAttached = false;
+  private readonly handleSocketMessageBound = (payload: string): void => void this.handleRawMessage(payload);
+  private readonly handleSocketErrorBound = (error: Error): void => this.handleSocketError(error);
+  private readonly handleSocketCloseBound = (code: number, reason: string): void => this.handleSocketClose(code, reason);
 
   public constructor(options: HomeConnectClientOptions) {
     this.socket = createHomeConnectSocket(options);
     this.appName = options.appName;
     this.appId = options.appId;
     this.log = options.log;
+    this.deviceLabel = options.deviceLabel;
     this.messageHandler = options.messageHandler;
     this.frameHandler = options.frameHandler;
     this.closeHandler = options.closeHandler;
@@ -65,9 +72,7 @@ export class HomeConnectClient {
     this.sid = initial.sID;
     this.lastMsgId = extractInitialMessageId(initial);
 
-    this.socket.on("message", payload => void this.handleRawMessage(payload));
-    this.socket.on("error", error => this.handleSocketError(error));
-    this.socket.on("close", (code, reason) => this.handleSocketClose(code, reason));
+    this.attachSocketHandlers();
 
     await runHomeConnectHandshake({
       appName: this.appName,
@@ -86,6 +91,7 @@ export class HomeConnectClient {
 
   public async close(): Promise<void> {
     this.connected = false;
+    this.detachSocketHandlers();
     this.pendingResponses.rejectAll(new Error("Home Connect client closed"));
     await this.socket.close();
   }
@@ -176,6 +182,26 @@ export class HomeConnectClient {
     return response;
   }
 
+  private attachSocketHandlers(): void {
+    if (this.socketHandlersAttached) return;
+    this.socket.on("message", this.handleSocketMessageBound);
+    this.socket.on("error", this.handleSocketErrorBound);
+    this.socket.on("close", this.handleSocketCloseBound);
+    this.socketHandlersAttached = true;
+  }
+
+  private detachSocketHandlers(): void {
+    if (!this.socketHandlersAttached) return;
+    this.socket.off("message", this.handleSocketMessageBound);
+    this.socket.off("error", this.handleSocketErrorBound);
+    this.socket.off("close", this.handleSocketCloseBound);
+    this.socketHandlersAttached = false;
+  }
+
+  private logPrefix(): string {
+    return this.deviceLabel ? `${this.deviceLabel}: ` : "";
+  }
+
   private prepareMessage(message: HcMessage): HcMessage {
     return {
       ...message,
@@ -246,17 +272,24 @@ export class HomeConnectClient {
   }
 
   private handleSocketError(error: Error): void {
-    this.log?.warn(`Home Connect socket error: ${error.message}`);
+    this.log?.warn(`${this.logPrefix()}Home Connect socket error: ${error.message}`);
     if (this.connected) {
       this.closeHandler?.(error);
     }
   }
 
   private handleSocketClose(code: number, reason: string): void {
-    this.log?.warn(`Home Connect socket closed: ${code} ${reason}`);
+    const message = `Socket closed: ${code} ${reason}`;
+    if (reason.includes("Duplicate connection to this deviceID detected")) {
+      this.log?.debug(`${this.logPrefix()}Home Connect socket closed: ${code} ${reason}`);
+    } else {
+      this.log?.warn(`${this.logPrefix()}Home Connect socket closed: ${code} ${reason}`);
+    }
     this.connected = false;
-    this.pendingResponses.rejectAll(new Error(`Socket closed: ${code} ${reason}`));
-    this.closeHandler?.();
+    this.detachSocketHandlers();
+    const error = new Error(message);
+    this.pendingResponses.rejectAll(error);
+    this.closeHandler?.(error);
   }
 }
 

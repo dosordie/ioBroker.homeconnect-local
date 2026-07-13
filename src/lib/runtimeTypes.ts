@@ -17,6 +17,7 @@ export interface RunningDevice {
   mapper: StateMapper;
   client?: HomeConnectClient;
   reconnectTimer?: NodeJS.Timeout;
+  connecting: boolean;
   watchdogHeartbeatInFlight?: boolean;
   lastRxAt?: number;
   lastRoRxAt?: number;

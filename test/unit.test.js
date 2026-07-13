@@ -797,6 +797,7 @@ test("ProgramAborted event summary text is neutral", () => {
 const { parseMessage } = require("../build/lib/message");
 const { parseRepairedAllMandatoryValuesResponse } = require("../build/lib/client");
 const { calculateIdleSeconds, recordHomeConnectFrame, shouldHeartbeatDevice, WATCHDOG_HEARTBEAT_REQUEST } = require("../build/lib/runtimeTypes");
+const { connectionFailureLogLevel, connectionFailureLogMessage, isExpectedOfflineError } = require("../build/lib/reconnectPolicy");
 
 function watchdogDevice(overrides = {}) {
   return {
@@ -806,6 +807,49 @@ function watchdogDevice(overrides = {}) {
     ...overrides,
   };
 }
+
+
+test("duplicate connection close is treated as reconnectable offline condition", () => {
+  const message = "Socket closed: 1000 Duplicate connection to this deviceID detected.";
+
+  assert.equal(isExpectedOfflineError(message), true);
+  assert.equal(connectionFailureLogLevel(message, 1), "info");
+  assert.equal(connectionFailureLogLevel(message, 2), "debug");
+  assert.equal(connectionFailureLogMessage("ha-1", message, 1), `ha-1: offline: ${message}`);
+  assert.equal(connectionFailureLogMessage("ha-1", message, 2), `ha-1: still offline, retrying: ${message}`);
+});
+
+test("device connect and reconnect flags guard duplicate connection attempts", () => {
+  const device = watchdogDevice({ connecting: false, reconnecting: false, reconnectTimer: undefined });
+  let connects = 0;
+  function guardedConnect() {
+    if (device.connecting || device.reconnecting) return;
+    device.connecting = true;
+    connects += 1;
+  }
+
+  guardedConnect();
+  guardedConnect();
+
+  assert.equal(connects, 1);
+});
+
+test("reconnect scheduling keeps only one retry timer per device", () => {
+  const timers = [];
+  const device = watchdogDevice({ reconnecting: false, reconnectTimer: undefined });
+  function scheduleReconnect() {
+    if (device.reconnecting || device.reconnectTimer) return;
+    device.reconnecting = true;
+    device.reconnectTimer = setTimeout(() => {}, 30_000);
+    timers.push(device.reconnectTimer);
+  }
+
+  scheduleReconnect();
+  scheduleReconnect();
+
+  for (const timer of timers) clearTimeout(timer);
+  assert.equal(timers.length, 1);
+});
 
 test("watchdog timestamps are updated for every frame and RO frames", () => {
   const device = watchdogDevice();

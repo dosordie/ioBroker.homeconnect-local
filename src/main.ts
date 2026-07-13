@@ -158,6 +158,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         config: configuredDevice,
         profile,
         mapper: new StateMapper(profile),
+        connecting: false,
         reconnecting: false,
         reconnectFailures: 0,
         watchdogReconnectCount: 0,
@@ -410,6 +411,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         config: configuredDevice,
         profile,
         mapper: new StateMapper(profile),
+        connecting: false,
         reconnecting: false,
         reconnectFailures: 0,
         watchdogReconnectCount: 0,
@@ -687,7 +689,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async connectDevice(device: RunningDevice): Promise<void> {
-    if (this.unloaded) return;
+    if (this.unloaded || device.connecting || device.reconnecting) return;
     if (device.profile.connectionType !== "AES" && device.profile.connectionType !== "TLS") {
       this.log.warn(`${device.profile.haId}: unsupported connectionType ${device.profile.connectionType}. Expected AES or TLS.`);
       return;
@@ -695,6 +697,18 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     if (device.profile.connectionType === "AES" && !device.profile.iv) {
       this.log.warn(`${device.profile.haId}: AES profile has no IV. Skipping device.`);
       return;
+    }
+
+    device.connecting = true;
+    if (device.reconnectTimer) {
+      clearTimeout(device.reconnectTimer);
+      device.reconnectTimer = undefined;
+    }
+
+    const previousClient = device.client;
+    if (previousClient) {
+      device.client = undefined;
+      await previousClient.close().catch(closeError => this.log.debug(`${device.profile.haId}: closing previous client before reconnect failed: ${String(closeError)}`));
     }
 
     this.log.debug(`${device.profile.haId}: connecting to ${device.config.host} via ${device.profile.connectionType}`);
@@ -706,15 +720,17 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       appName: this.currentConfig.appName || "ioBroker HomeConnect Local",
       appId: this.currentConfig.appId || "iobroker-homeconnect-local",
       log: this.log,
+      deviceLabel: device.profile.haId,
       messageHandler: message => this.handleDeviceMessage(device, message),
       frameHandler: message => recordHomeConnectFrame(device, message.resource),
-      closeHandler: error => this.scheduleReconnect(device, error),
+      closeHandler: error => this.handleDeviceClientClose(device, client, error),
     });
     device.client = client;
 
     try {
       await client.connect();
       if (this.unloaded) {
+        if (device.client === client) device.client = undefined;
         await client.close().catch(closeError => this.log.debug(`Close after unload failed: ${String(closeError)}`));
         return;
       }
@@ -724,12 +740,28 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       if (this.unloaded) return;
       await client.readInitialValues();
     } catch (error) {
+      if (device.client === client) device.client = undefined;
       await client.close().catch(closeError => this.log.debug(`Close after failed connect failed: ${String(closeError)}`));
       if (this.unloaded) return;
       await this.setDeviceConnectionState(device, false, error);
       this.logConnectionFailure(device, error);
       this.scheduleReconnect(device, error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      if (device.client === client || !device.client) device.connecting = false;
     }
+  }
+
+  private handleDeviceClientClose(device: RunningDevice, client: HomeConnectClient, error?: Error): void {
+    if (device.client !== client) return;
+    device.client = undefined;
+    void (async () => {
+      try {
+        await this.setDeviceConnectionState(device, false, error);
+      } catch (setStateError) {
+        if (!this.unloaded) this.log.debug(`${device.profile.haId}: updating closed connection state failed: ${String(setStateError)}`);
+      }
+      this.scheduleReconnect(device, error);
+    })();
   }
 
   private async onStateChange(id: string, state: ioBroker.State | null | undefined): Promise<void> {
@@ -1001,6 +1033,14 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private scheduleReconnect(device: RunningDevice, error?: Error): void {
     if (this.unloaded || device.reconnecting) return;
+    if (device.reconnectTimer) return;
+    const existingClient = device.client;
+    if (existingClient) {
+      device.client = undefined;
+      void existingClient.close().catch(closeError => {
+        if (!this.unloaded) this.log.debug(`${device.profile.haId}: closing client before scheduled reconnect failed: ${String(closeError)}`);
+      });
+    }
     if (error) void this.setState(`${device.baseId}.info.lastError`, error.message, true).catch(setStateError => {
       if (!this.unloaded) this.log.debug(`${device.profile.haId}: writing reconnect error state failed: ${String(setStateError)}`);
     });
@@ -1013,6 +1053,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     });
     const seconds = Math.max(5, Number(this.currentConfig.reconnectInterval ?? 30));
     device.reconnectTimer = setTimeout(() => {
+      device.reconnectTimer = undefined;
       if (this.unloaded) return;
       device.reconnecting = false;
       void this.setState(`${device.baseId}.info.reconnecting`, false, true).catch(setStateError => {

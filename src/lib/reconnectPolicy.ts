@@ -6,6 +6,7 @@ export function isExpectedOfflineError(message: string): boolean {
     "ETIMEDOUT",
     "ECONNREFUSED",
     "Timeout while connecting",
+    "Duplicate connection to this deviceID detected",
   ].some(marker => message.includes(marker));
 }
 

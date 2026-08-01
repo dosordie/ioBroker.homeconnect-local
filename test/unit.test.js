@@ -985,7 +985,8 @@ test("malformed allMandatoryValues retry classification remains available", () =
 });
 
 test("initial RO snapshot retries timeouts and malformed responses", () => {
-  const { isRetryableInitialReadError } = require("../build/lib/client");
+  const { INITIAL_SNAPSHOT_BACKGROUND_RETRY_MS, isRetryableInitialReadError } = require("../build/lib/client");
+  assert.equal(INITIAL_SNAPSHOT_BACKGROUND_RETRY_MS, 30_000);
   assert.equal(isRetryableInitialReadError(new Error("Timeout waiting for response to /ro/allMandatoryValues")), true);
   assert.equal(isRetryableInitialReadError(new Error("Malformed Home Connect JSON for /ro/allMandatoryValues")), true);
   assert.equal(isRetryableInitialReadError(new Error("Home Connect client closed")), false);

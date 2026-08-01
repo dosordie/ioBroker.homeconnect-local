@@ -43,6 +43,7 @@ export class HomeConnectClient {
   private sid?: number;
   private lastMsgId?: number;
   private connected = false;
+  private closing = false;
   private socketHandlersAttached = false;
   private readonly handleSocketMessageBound = (payload: string): void => void this.handleRawMessage(payload);
   private readonly handleSocketErrorBound = (error: Error): void => this.handleSocketError(error);
@@ -90,6 +91,8 @@ export class HomeConnectClient {
   }
 
   public async close(): Promise<void> {
+    if (this.closing) return;
+    this.closing = true;
     this.connected = false;
     this.detachSocketHandlers();
     this.pendingResponses.rejectAll(new Error("Home Connect client closed"));
@@ -289,7 +292,9 @@ export class HomeConnectClient {
     this.detachSocketHandlers();
     const error = new Error(message);
     this.pendingResponses.rejectAll(error);
-    this.closeHandler?.(error);
+    if (!this.closing) {
+      this.closeHandler?.(error);
+    }
   }
 }
 

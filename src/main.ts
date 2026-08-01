@@ -1110,7 +1110,11 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       }
       device.watchdogReconnectCount += 1;
       this.log.warn(`${device.profile.haId}: no HomeConnect traffic for ${idleSeconds}s and heartbeat failed, reconnecting`);
+      device.connected = false;
       await client.close().catch(closeError => this.log.debug(`${device.profile.haId}: watchdog close failed: ${String(closeError)}`));
+      await this.setDeviceConnectionState(device, false, error).catch(stateError => {
+        this.log.debug(`${device.profile.haId}: updating disconnected state after heartbeat failure failed: ${String(stateError)}`);
+      });
       this.scheduleReconnect(device, error instanceof Error ? error : new Error(String(error)));
     } finally {
       device.watchdogHeartbeatInFlight = false;

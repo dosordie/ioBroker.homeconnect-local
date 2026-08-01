@@ -100,9 +100,20 @@ export class HomeConnectAesSocket extends EventEmitter {
     }
 
     await new Promise<void>(resolve => {
-      current.once("close", () => resolve());
+      let settled = false;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(forceCloseTimer);
+        resolve();
+      };
+      const forceCloseTimer = setTimeout(() => {
+        current.terminate();
+        finish();
+      }, 2000);
+      forceCloseTimer.unref();
+      current.once("close", finish);
       current.close();
-      setTimeout(() => resolve(), 2000).unref();
     });
   }
 

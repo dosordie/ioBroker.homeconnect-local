@@ -41,6 +41,7 @@ export class HomeConnectClient {
   private sid?: number;
   private lastMsgId?: number;
   private connected = false;
+  private closing = false;
 
   public constructor(options: HomeConnectClientOptions) {
     this.socket = createHomeConnectSocket(options);
@@ -85,6 +86,8 @@ export class HomeConnectClient {
   }
 
   public async close(): Promise<void> {
+    if (this.closing) return;
+    this.closing = true;
     this.connected = false;
     this.pendingResponses.rejectAll(new Error("Home Connect client closed"));
     await this.socket.close();
@@ -256,7 +259,9 @@ export class HomeConnectClient {
     this.log?.warn(`Home Connect socket closed: ${code} ${reason}`);
     this.connected = false;
     this.pendingResponses.rejectAll(new Error(`Socket closed: ${code} ${reason}`));
-    this.closeHandler?.();
+    if (!this.closing) {
+      this.closeHandler?.();
+    }
   }
 }
 

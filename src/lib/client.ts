@@ -113,8 +113,8 @@ export class HomeConnectClient {
           break;
         } catch (error) {
           lastError = error;
-          if (attempt < INITIAL_READ_RETRIES && isMalformedJsonError(error)) {
-            this.log?.warn(`GET ${resource} returned malformed JSON, retrying once: ${String(error)}`);
+          if (attempt < INITIAL_READ_RETRIES && isRetryableInitialReadError(error)) {
+            this.log?.warn(`GET ${resource} did not return a usable response, retrying once: ${String(error)}`);
             continue;
           }
           break;
@@ -311,6 +311,17 @@ function extractPartialMessageIdentity(payload: string): PartialMessageIdentity 
 
 function isMalformedJsonError(error: unknown): boolean {
   return error instanceof Error && error.message.startsWith("Malformed Home Connect JSON");
+}
+
+/**
+ * Some appliances sporadically ignore the first RO snapshot request while they
+ * are still completing their device-ready initialization. A late response is
+ * still forwarded by handleRawMessage, but retrying also gives appliances that
+ * dropped the request a chance to provide their complete initial state.
+ */
+export function isRetryableInitialReadError(error: unknown): boolean {
+  return isMalformedJsonError(error)
+    || (error instanceof Error && error.message.startsWith("Timeout waiting for response to /ro/"));
 }
 
 export function parseRepairedAllMandatoryValuesResponse(payload: string, error: unknown): HcMessage | undefined {

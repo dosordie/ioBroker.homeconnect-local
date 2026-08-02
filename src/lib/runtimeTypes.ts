@@ -24,6 +24,12 @@ export interface RunningDevice {
   watchdogReconnectCount: number;
   reconnecting: boolean;
   reconnectFailures: number;
+  powerResetCommunicationFailures: number;
+  wifiReconnectTriggeredAt?: number;
+  powerResetPerformed?: boolean;
+  powerResetLowPowerSince?: number;
+  powerResetInProgress?: boolean;
+  powerResetTimer?: NodeJS.Timeout;
   connected: boolean;
   writableUids: Set<string>;
   readOnlyUids: Set<string>;

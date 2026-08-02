@@ -161,6 +161,66 @@
               "title": "Profile file",
               "width": "520",
               "readOnly": true
+            },
+            {
+              "attr": "enableWifiReconnect",
+              "type": "checkbox",
+              "title": "Wi-Fi reconnect",
+              "width": "130"
+            },
+            {
+              "attr": "wifiReconnectWaitMinutes",
+              "type": "number",
+              "title": "Wi-Fi wait minutes",
+              "width": "140"
+            },
+            {
+              "attr": "wifiReconnectUseMac",
+              "type": "checkbox",
+              "title": "Output MAC instead of True",
+              "width": "190"
+            },
+            {
+              "attr": "enablePowerReset",
+              "type": "checkbox",
+              "title": "Power reset",
+              "width": "110"
+            },
+            {
+              "attr": "powerMeasurementStateId",
+              "type": "text",
+              "title": "Power input state ID",
+              "width": "300"
+            },
+            {
+              "attr": "powerSwitchStateId",
+              "type": "text",
+              "title": "Power switch output state ID",
+              "width": "300"
+            },
+            {
+              "attr": "powerSwitchFeedbackStateId",
+              "type": "text",
+              "title": "Power switch feedback state ID",
+              "width": "300"
+            },
+            {
+              "attr": "powerResetThresholdWatts",
+              "type": "number",
+              "title": "Idle below W",
+              "width": "130"
+            },
+            {
+              "attr": "powerResetIdleMinutes",
+              "type": "number",
+              "title": "Idle minutes",
+              "width": "120"
+            },
+            {
+              "attr": "powerResetFailureCount",
+              "type": "number",
+              "title": "Failures",
+              "width": "100"
             }
           ]
         }

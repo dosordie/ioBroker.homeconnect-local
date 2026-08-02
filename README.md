@@ -38,6 +38,7 @@ Implemented now:
 - `commands.StartProgram` and `commands.StartProgramWithOptions` for selected-program starts.
 - Filtering of dangerous commands such as factory reset, network reset, Wi-Fi deactivation and software update/download commands.
 - Offline handling for appliances that are only reachable when switched on, such as washer and dryer.
+- Optional, conservative appliance power reset after repeated communication failures and a continuously low external wattage reading.
 
 Known limitations:
 
@@ -115,6 +116,33 @@ Important config fields:
 - `debugRaw`: logs received raw `/ro` values for debugging. Disable after testing if personal device/app names are visible.
 - `enableRawStates`: creates optional debug states under `raw.uid_<uid>` with raw Home Connect values. Defaults to `false`.
 
+### Staged Wi-Fi reconnect and conservative power reset
+
+Recovery is configured separately for each appliance in the device table and both stages are disabled by default. Configure the first stage:
+
+- `Wi-Fi reconnect`: explicitly enables the first recovery stage.
+- `<device>.recovery.wifiReconnectRequested`: output object created by the adapter and intended to be observed by Node-RED. By default the adapter pulses it to boolean `true` for one second; no external output ID has to be configured.
+- `Wi-Fi wait minutes`: time allowed for communication to recover after the trigger (default 2 minutes, hard minimum 1 minute).
+- `Output MAC instead of True`: optionally changes the recovery output to a string and emits the appliance MAC address instead of `true`, then clears it to an empty string. The MAC comes from the configured device/profile metadata; if none is available, the Wi-Fi trigger is safely blocked.
+
+The Wi-Fi trigger requires repeated communication failures, but intentionally does not require low power: the appliance may be running while only its Wi-Fi connection is stuck. It is emitted only once in a failure episode. A valid subsequent `/ro/*` message counts as recovery and re-arms both recovery stages.
+
+The optional second stage is intended for a switchable external power supply and an independently measured power value. It requires the Wi-Fi stage to be enabled. Configure:
+
+- `Power reset`: explicitly enables the function.
+- `Power input state ID`: full ioBroker state ID containing the current consumption in watts.
+- `Power switch output state ID`: full ioBroker writable boolean state ID; `false` cuts power and `true` restores it.
+- `Power switch feedback state ID`: separate boolean input carrying the actor's actual switching status. It must explicitly be `true`; `false`, a missing value, or a non-boolean value blocks the reset even if the command output says otherwise.
+- `Idle below W`: idle threshold (default 5 W).
+- `Idle minutes`: uninterrupted observation time below the threshold (default 15 minutes, hard minimum 5 minutes).
+- `Failures`: required communication failures (default and hard minimum 3).
+
+The adapter does **not** cut power merely because the appliance is offline. It first emits the Wi-Fi trigger and waits for its configured grace period. Only if communication still has not recovered does it evaluate the power-reset gates: all configured state IDs, repeated failures, a numeric non-negative and recent wattage measurement, uninterrupted consumption below the threshold for the full idle period, and separate actor feedback explicitly confirmed as `true`. It then writes `false`, waits 10 seconds, and restores `true`. Feedback `false` is treated as an intentional or already active shutdown and therefore blocks all switching. Missing, stale, invalid, negative, or high consumption also blocks the reset.
+
+At most one power reset is performed in a failure episode. The lock and the preceding Wi-Fi trigger timestamp are persisted in the appliance's `info` states, so an adapter restart does not silently permit another immediate power cut. Further failures cannot produce another power cut until a valid Home Connect `/ro/*` message has demonstrated communication recovery and re-armed the sequence. The external switch should still be designed to restore power safely if ioBroker itself fails.
+
+Initial RO snapshot recovery remains enabled because a temporarily missing snapshot can recover without restarting the appliance. To avoid endlessly querying an internally stuck appliance, background recovery is now limited to three attempts per snapshot and each failed cycle contributes to the power-reset failure prerequisite.
+
 ## mDNS discovery and auto-add
 
 Discovery uses the local service:
@@ -171,6 +199,7 @@ homeconnect-local.0.<haId>.settings.*
 homeconnect-local.0.<haId>.events.*
 homeconnect-local.0.<haId>.phases.*
 homeconnect-local.0.<haId>.commands.*
+homeconnect-local.0.<haId>.recovery.*
 homeconnect-local.0.<haId>.expertCommands.*
 homeconnect-local.0.<haId>.raw.uid_<uid> (optional, only if enableRawStates=true)
 ```
@@ -193,6 +222,7 @@ availablePrograms.availableJson
 settings.PowerState
 commands.StartProgram
 commands.StartProgramWithOptions
+recovery.wifiReconnectRequested
 status.eventSummary_de
 status.activeEventsJson
 ```

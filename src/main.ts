@@ -33,6 +33,7 @@ import { evaluateEffectivePowerState, POWER_STATE_FEATURE } from "./lib/effectiv
 import { evaluateHobZoneSummary, isHobZoneFeature } from "./lib/hobActiveZones";
 import { hasWritableProgramOption, isProgramOptionDescriptionWritable, isReadOnlyProgramOption, isWritableAccess, normalizedAccess } from "./lib/optionWriteability";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue, StateTarget } from "./lib/types";
+import { DEFAULT_POWER_RESET_FAILURES, DEFAULT_POWER_RESET_IDLE_MINUTES, DEFAULT_POWER_RESET_THRESHOLD_WATTS, DEFAULT_WIFI_RECONNECT_WAIT_MINUTES, POWER_RESET_OFF_MS, WIFI_RECONNECT_PULSE_MS, powerResetBlockReason, stagedRecoveryAction, wifiReconnectPulseValue } from "./lib/powerReset";
 
 interface DiscoveryScanResult {
   found: DiscoveredHomeConnectDevice[];
@@ -161,6 +162,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         connecting: false,
         reconnecting: false,
         reconnectFailures: 0,
+        powerResetCommunicationFailures: 0,
         watchdogReconnectCount: 0,
         connected: false,
         writableUids: new Set<string>(),
@@ -177,6 +179,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       if (this.unloaded) return;
       this.devices.set(profile.haId, device);
       await this.prepareDeviceObjects(device);
+      await this.preparePowerReset(device);
       if (this.unloaded) return;
       await this.connectDevice(device);
       if (this.unloaded) return;
@@ -414,6 +417,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         connecting: false,
         reconnecting: false,
         reconnectFailures: 0,
+        powerResetCommunicationFailures: 0,
         watchdogReconnectCount: 0,
         connected: false,
         writableUids: new Set<string>(),
@@ -430,6 +434,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       if (this.unloaded) return;
       this.devices.set(profile.haId, device);
       await this.prepareDeviceObjects(device);
+      await this.preparePowerReset(device);
       if (this.unloaded) return;
       await this.connectDevice(device);
       if (this.unloaded) return;
@@ -520,6 +525,220 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     await this.prepareStartProgramObjects(device);
     if (this.unloaded) return;
     await this.updateProgramList(device);
+  }
+
+  private async preparePowerReset(device: RunningDevice): Promise<void> {
+    if (device.config.enableWifiReconnect === true || device.config.enablePowerReset === true) {
+      await this.ensureChannel(`${device.baseId}.recovery`, "Staged recovery");
+      const wifiOutputInitialValue = device.config.wifiReconnectUseMac === true ? "" : false;
+      await this.ensureStateObject(`${device.baseId}.recovery.wifiReconnectRequested`, "Request external Wi-Fi reconnect", wifiOutputInitialValue, device.config.wifiReconnectUseMac === true ? "text" : "indicator");
+      await this.ensureStateObject(`${device.baseId}.info.wifiReconnectTriggeredAt`, "Last staged Wi-Fi reconnect trigger", 0, "value");
+      await this.ensureStateObject(`${device.baseId}.info.powerResetLocked`, "Power reset locked until valid RO communication", false, "indicator");
+      const wifiTriggeredAt = await this.getStateAsync(`${device.baseId}.info.wifiReconnectTriggeredAt`);
+      const powerResetLocked = await this.getStateAsync(`${device.baseId}.info.powerResetLocked`);
+      if (typeof wifiTriggeredAt?.val === "number" && wifiTriggeredAt.val > 0) device.wifiReconnectTriggeredAt = wifiTriggeredAt.val;
+      device.powerResetPerformed = powerResetLocked?.val === true;
+      await this.setState(`${device.baseId}.recovery.wifiReconnectRequested`, wifiOutputInitialValue, true);
+    }
+    if (device.config.enableWifiReconnect === true) {
+      this.log.info(`${device.profile.haId}: Wi-Fi reconnect recovery armed (output ${device.baseId}.recovery.wifiReconnectRequested)`);
+    }
+    if (device.config.enablePowerReset !== true) return;
+    const measurementId = device.config.powerMeasurementStateId?.trim();
+    const switchId = device.config.powerSwitchStateId?.trim();
+    const switchFeedbackId = device.config.powerSwitchFeedbackStateId?.trim();
+    if (device.config.enableWifiReconnect !== true) {
+      this.log.warn(`${device.profile.haId}: power reset requires the first-stage Wi-Fi reconnect to be enabled; automatic power cuts are disabled`);
+      return;
+    }
+    if (!measurementId || !switchId || !switchFeedbackId) {
+      this.log.warn(`${device.profile.haId}: power reset wattage input, switch output, or separate switch feedback state ID is incomplete; automatic power cuts are disabled`);
+      return;
+    }
+    await this.subscribeForeignStatesAsync(measurementId);
+    const state = await this.getForeignStateAsync(measurementId);
+    if (state) this.recordPowerMeasurement(device, state);
+    this.log.info(`${device.profile.haId}: conservative power reset armed (wattage ${measurementId}, output ${switchId}, feedback ${switchFeedbackId})`);
+  }
+
+  private recordPowerMeasurement(device: RunningDevice, state: ioBroker.State): void {
+    const watts = typeof state.val === "number" ? state.val : Number.NaN;
+    const threshold = this.powerResetThresholdWatts(device);
+    if (Number.isFinite(watts) && watts >= 0 && watts < threshold) {
+      device.powerResetLowPowerSince ??= Date.now();
+    } else {
+      device.powerResetLowPowerSince = undefined;
+    }
+    if (device.powerResetCommunicationFailures >= this.powerResetRequiredFailures(device)) this.schedulePowerResetEvaluation(device);
+  }
+
+  private recordCommunicationFailure(device: RunningDevice, error: unknown): void {
+    if (device.config.enableWifiReconnect !== true && device.config.enablePowerReset !== true) return;
+    device.powerResetCommunicationFailures += 1;
+    this.log.warn(`${device.profile.haId}: communication failure ${device.powerResetCommunicationFailures}/${this.powerResetRequiredFailures(device)} recorded for staged recovery: ${String(error)}`);
+    this.schedulePowerResetEvaluation(device);
+  }
+
+  private schedulePowerResetEvaluation(device: RunningDevice): void {
+    if (this.unloaded || device.powerResetTimer || device.powerResetInProgress) return;
+    const lowSince = device.powerResetLowPowerSince;
+    const delay = device.wifiReconnectTriggeredAt === undefined || lowSince === undefined
+      ? 0
+      : Math.max(0, lowSince + this.powerResetIdleMs(device) - Date.now());
+    device.powerResetTimer = setTimeout(() => {
+      device.powerResetTimer = undefined;
+      void this.tryStagedRecovery(device).catch(error => {
+        if (!this.unloaded) this.log.error(`${device.profile.haId}: staged recovery failed safely: ${String(error)}`);
+      });
+    }, delay);
+    device.powerResetTimer.unref?.();
+  }
+
+  private async tryStagedRecovery(device: RunningDevice): Promise<void> {
+    if (this.unloaded) return;
+    const remainingWaitMs = device.wifiReconnectTriggeredAt === undefined
+      ? this.wifiReconnectWaitMs(device)
+      : device.wifiReconnectTriggeredAt + this.wifiReconnectWaitMs(device) - Date.now();
+    const action = stagedRecoveryAction(
+      device.powerResetCommunicationFailures,
+      this.powerResetRequiredFailures(device),
+      device.wifiReconnectTriggeredAt !== undefined,
+      remainingWaitMs <= 0,
+      device.powerResetPerformed === true,
+    );
+    if (action === "none" || action === "lockedUntilRecovery") return;
+    if (action === "wifiReconnect") {
+      if (device.config.enableWifiReconnect !== true) return;
+      const wifiStateId = `${device.baseId}.recovery.wifiReconnectRequested`;
+      const wifiRequestValue = wifiReconnectPulseValue(device.config.wifiReconnectUseMac === true, device.config.mac, device.profile.mac);
+      if (device.config.wifiReconnectUseMac === true && wifiRequestValue === "") {
+        this.log.warn(`${device.profile.haId}: Wi-Fi reconnect MAC output is enabled but the profile/configuration has no MAC address`);
+        return;
+      }
+      device.wifiReconnectTriggeredAt = Date.now();
+      try {
+        await this.setState(wifiStateId, wifiRequestValue, true);
+      } catch (error) {
+        device.wifiReconnectTriggeredAt = undefined;
+        throw error;
+      }
+      await this.setState(`${device.baseId}.info.wifiReconnectTriggeredAt`, device.wifiReconnectTriggeredAt, true).catch(error => {
+        if (!this.unloaded) this.log.error(`${device.profile.haId}: persisting Wi-Fi recovery latch failed: ${String(error)}`);
+      });
+      this.log.warn(`${device.profile.haId}: first recovery stage triggered ${wifiStateId}=${JSON.stringify(wifiRequestValue)}; waiting for communication to recover`);
+      void (async () => {
+        await new Promise(resolve => setTimeout(resolve, WIFI_RECONNECT_PULSE_MS));
+        await this.setState(wifiStateId, device.config.wifiReconnectUseMac === true ? "" : false, true).catch(error => {
+          if (!this.unloaded) this.log.debug(`${device.profile.haId}: resetting Wi-Fi reconnect trigger to False failed: ${String(error)}`);
+        });
+      })();
+      this.schedulePowerResetEvaluation(device);
+      return;
+    }
+    if (action === "waitForWifi") {
+      device.powerResetTimer = setTimeout(() => {
+        device.powerResetTimer = undefined;
+        void this.tryStagedRecovery(device).catch(error => {
+          if (!this.unloaded) this.log.error(`${device.profile.haId}: staged recovery failed safely: ${String(error)}`);
+        });
+      }, remainingWaitMs);
+      device.powerResetTimer.unref?.();
+      return;
+    }
+    await this.tryPowerReset(device);
+  }
+
+  private recordCommunicationRecovery(device: RunningDevice): void {
+    if (device.powerResetCommunicationFailures === 0 && device.wifiReconnectTriggeredAt === undefined && device.powerResetPerformed !== true) return;
+    if (device.powerResetTimer) {
+      clearTimeout(device.powerResetTimer);
+      device.powerResetTimer = undefined;
+    }
+    device.powerResetCommunicationFailures = 0;
+    device.wifiReconnectTriggeredAt = undefined;
+    device.powerResetPerformed = false;
+    void this.setState(`${device.baseId}.info.wifiReconnectTriggeredAt`, 0, true).catch(error => {
+      if (!this.unloaded) this.log.debug(`${device.profile.haId}: clearing persisted Wi-Fi recovery latch failed: ${String(error)}`);
+    });
+    void this.setState(`${device.baseId}.info.powerResetLocked`, false, true).catch(error => {
+      if (!this.unloaded) this.log.debug(`${device.profile.haId}: clearing persisted power-reset lock failed: ${String(error)}`);
+    });
+    this.log.info(`${device.profile.haId}: valid RO communication recovered; staged Wi-Fi/power reset is re-armed`);
+  }
+
+  private async tryPowerReset(device: RunningDevice): Promise<void> {
+    const measurementId = device.config.powerMeasurementStateId?.trim();
+    const switchId = device.config.powerSwitchStateId?.trim();
+    const switchFeedbackId = device.config.powerSwitchFeedbackStateId?.trim();
+    if (!measurementId || !switchId || !switchFeedbackId || this.unloaded || device.powerResetPerformed === true) return;
+    const measurement = await this.getForeignStateAsync(measurementId);
+    const switchFeedback = await this.getForeignStateAsync(switchFeedbackId);
+    const reason = powerResetBlockReason({
+      enabled: device.config.enablePowerReset === true,
+      failures: device.powerResetCommunicationFailures,
+      requiredFailures: this.powerResetRequiredFailures(device),
+      watts: measurement?.val,
+      measurementTimestamp: measurement?.ts,
+      lowPowerSince: device.powerResetLowPowerSince,
+      now: Date.now(),
+      thresholdWatts: this.powerResetThresholdWatts(device),
+      idleMs: this.powerResetIdleMs(device),
+      resetInProgress: device.powerResetInProgress === true,
+      powerSwitchFeedback: switchFeedback?.val,
+    });
+    if (reason) {
+      this.log.debug(`${device.profile.haId}: power reset blocked: ${reason}`);
+      return;
+    }
+    device.powerResetInProgress = true;
+    if (device.reconnectTimer) {
+      clearTimeout(device.reconnectTimer);
+      device.reconnectTimer = undefined;
+    }
+    device.reconnecting = true;
+    const client = device.client;
+    device.client = undefined;
+    await client?.close().catch(error => this.log.debug(`${device.profile.haId}: closing client before power reset failed: ${String(error)}`));
+    this.log.warn(`${device.profile.haId}: all safety conditions passed; switching ${switchId} False for ${POWER_RESET_OFF_MS / 1000}s`);
+    let switchedOff = false;
+    try {
+      await this.setForeignStateAsync(switchId, false, false);
+      switchedOff = true;
+      device.powerResetPerformed = true;
+      await this.setState(`${device.baseId}.info.powerResetLocked`, true, true).catch(error => {
+        if (!this.unloaded) this.log.error(`${device.profile.haId}: persisting power-reset lock failed: ${String(error)}`);
+      });
+      await new Promise(resolve => setTimeout(resolve, POWER_RESET_OFF_MS));
+    } finally {
+      try {
+        if (switchedOff) await this.setForeignStateAsync(switchId, true, false);
+      } finally {
+        device.powerResetInProgress = false;
+        device.powerResetLowPowerSince = undefined;
+        device.reconnecting = false;
+      }
+    }
+    if (!this.unloaded) this.scheduleReconnect(device, new Error("Reconnect after controlled power reset"));
+  }
+
+  private powerResetThresholdWatts(device: RunningDevice): number {
+    const value = Number(device.config.powerResetThresholdWatts ?? DEFAULT_POWER_RESET_THRESHOLD_WATTS);
+    return Number.isFinite(value) ? Math.max(0.1, value) : DEFAULT_POWER_RESET_THRESHOLD_WATTS;
+  }
+
+  private powerResetIdleMs(device: RunningDevice): number {
+    const value = Number(device.config.powerResetIdleMinutes ?? DEFAULT_POWER_RESET_IDLE_MINUTES);
+    return (Number.isFinite(value) ? Math.max(5, value) : DEFAULT_POWER_RESET_IDLE_MINUTES) * 60_000;
+  }
+
+  private powerResetRequiredFailures(device: RunningDevice): number {
+    const value = Number(device.config.powerResetFailureCount ?? DEFAULT_POWER_RESET_FAILURES);
+    return Number.isFinite(value) ? Math.max(3, Math.floor(value)) : DEFAULT_POWER_RESET_FAILURES;
+  }
+
+  private wifiReconnectWaitMs(device: RunningDevice): number {
+    const value = Number(device.config.wifiReconnectWaitMinutes ?? DEFAULT_WIFI_RECONNECT_WAIT_MINUTES);
+    return (Number.isFinite(value) ? Math.max(1, value) : DEFAULT_WIFI_RECONNECT_WAIT_MINUTES) * 60_000;
   }
 
 
@@ -724,6 +943,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       messageHandler: message => this.handleDeviceMessage(device, message),
       frameHandler: message => recordHomeConnectFrame(device, message.resource),
       closeHandler: error => this.handleDeviceClientClose(device, client, error),
+      communicationFailureHandler: error => this.recordCommunicationFailure(device, error),
     });
     device.client = client;
 
@@ -765,7 +985,14 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async onStateChange(id: string, state: ioBroker.State | null | undefined): Promise<void> {
-    if (this.unloaded || !state || state.ack) return;
+    if (this.unloaded || !state) return;
+    for (const device of this.devices.values()) {
+      if (device.config.enablePowerReset === true && id === device.config.powerMeasurementStateId) {
+        this.recordPowerMeasurement(device, state);
+        return;
+      }
+    }
+    if (state.ack) return;
     const relativeId = id.startsWith(`${this.namespace}.`) ? id.slice(this.namespace.length + 1) : id;
     if (relativeId === "discovery.scanNow") {
       if (this.currentConfig.enableMdnsDiscovery === true) {
@@ -1109,6 +1336,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
         this.log.debug(`${device.profile.haId}: heartbeat returned HomeConnect code ${responseCode} for ${WATCHDOG_HEARTBEAT_REQUEST.resource}, reconnecting`);
       }
       device.watchdogReconnectCount += 1;
+      this.recordCommunicationFailure(device, error);
       this.log.warn(`${device.profile.haId}: no HomeConnect traffic for ${idleSeconds}s and heartbeat failed, reconnecting`);
       device.connected = false;
       await client.close().catch(closeError => this.log.debug(`${device.profile.haId}: watchdog close failed: ${String(closeError)}`));
@@ -1126,6 +1354,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     device.reconnectFailures += 1;
     const level = connectionFailureLogLevel(message, device.reconnectFailures);
     this.log[level](connectionFailureLogMessage(device.profile.haId, message, device.reconnectFailures));
+    this.recordCommunicationFailure(device, error);
   }
 
   private async setDeviceConnectionState(device: RunningDevice, connected: boolean, error?: unknown): Promise<void> {
@@ -1148,6 +1377,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private async handleDeviceMessage(device: RunningDevice, message: HcMessage): Promise<void> {
     recordHomeConnectFrame(device, message.resource);
+    if (message.resource?.startsWith("/ro/")) this.recordCommunicationRecovery(device);
     await this.setState(`${device.baseId}.info.lastSeen`, new Date().toISOString(), true);
     await this.setState(`${device.baseId}.info.lastMessage`, JSON.stringify(message), true);
     if (message.resource === "/ci/info" || message.resource === "/iz/info") await writeApplianceInfo(this, device, message.data);
@@ -1492,6 +1722,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       }
       for (const device of this.devices.values()) {
         if (device.reconnectTimer) clearTimeout(device.reconnectTimer);
+        if (device.powerResetTimer) clearTimeout(device.powerResetTimer);
         await this.setDeviceConnectionState(device, false);
         await device.client?.close();
       }

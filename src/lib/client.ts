@@ -9,6 +9,7 @@ import { ConnectionType, HcMessage } from "./types";
 
 const INITIAL_READ_RETRIES = 1;
 export const INITIAL_SNAPSHOT_BACKGROUND_RETRY_MS = 30_000;
+export const INITIAL_SNAPSHOT_BACKGROUND_MAX_ATTEMPTS = 3;
 
 export interface HomeConnectClientOptions {
   host: string;
@@ -22,6 +23,7 @@ export interface HomeConnectClientOptions {
   messageHandler?: (message: HcMessage) => Promise<void> | void;
   frameHandler?: (message: HcMessage) => void;
   closeHandler?: (error?: Error) => void;
+  communicationFailureHandler?: (error: Error) => void;
 }
 
 interface PartialMessageIdentity {
@@ -38,6 +40,7 @@ export class HomeConnectClient {
   private readonly messageHandler?: HomeConnectClientOptions["messageHandler"];
   private readonly frameHandler?: HomeConnectClientOptions["frameHandler"];
   private readonly closeHandler?: HomeConnectClientOptions["closeHandler"];
+  private readonly communicationFailureHandler?: HomeConnectClientOptions["communicationFailureHandler"];
   private readonly pendingResponses = new PendingResponses();
 
   private serviceVersions: Record<string, number> = {};
@@ -49,6 +52,7 @@ export class HomeConnectClient {
   private readonly initialSnapshotRetryTimers = new Map<string, NodeJS.Timeout>();
   private readonly initialSnapshotRetriesInFlight = new Set<string>();
   private readonly initialSnapshotsReceived = new Set<string>();
+  private readonly initialSnapshotRetryAttempts = new Map<string, number>();
   private readonly handleSocketMessageBound = (payload: string): void => void this.handleRawMessage(payload);
   private readonly handleSocketErrorBound = (error: Error): void => this.handleSocketError(error);
   private readonly handleSocketCloseBound = (code: number, reason: string): void => this.handleSocketClose(code, reason);
@@ -62,6 +66,7 @@ export class HomeConnectClient {
     this.messageHandler = options.messageHandler;
     this.frameHandler = options.frameHandler;
     this.closeHandler = options.closeHandler;
+    this.communicationFailureHandler = options.communicationFailureHandler;
   }
 
   public async connect(): Promise<void> {
@@ -128,6 +133,7 @@ export class HomeConnectClient {
 
       if (lastError !== undefined) {
         this.log?.warn(`GET ${resource} failed: ${String(lastError)}`);
+        this.communicationFailureHandler?.(lastError instanceof Error ? lastError : new Error(String(lastError)));
         if (isRetryableInitialReadError(lastError)) this.scheduleInitialSnapshotRetry(resource);
       }
     }
@@ -135,6 +141,10 @@ export class HomeConnectClient {
 
   private scheduleInitialSnapshotRetry(resource: string): void {
     if (this.closing || !this.connected || this.initialSnapshotsReceived.has(resource) || this.initialSnapshotRetryTimers.has(resource)) return;
+    if ((this.initialSnapshotRetryAttempts.get(resource) ?? 0) >= INITIAL_SNAPSHOT_BACKGROUND_MAX_ATTEMPTS) {
+      this.log?.warn(`GET ${resource} background retries stopped after ${INITIAL_SNAPSHOT_BACKGROUND_MAX_ATTEMPTS} attempts`);
+      return;
+    }
     const timer = setTimeout(() => {
       this.initialSnapshotRetryTimers.delete(resource);
       void this.retryInitialSnapshot(resource);
@@ -147,6 +157,7 @@ export class HomeConnectClient {
   private async retryInitialSnapshot(resource: string): Promise<void> {
     if (this.closing || !this.connected || this.initialSnapshotRetriesInFlight.has(resource)) return;
     this.initialSnapshotRetriesInFlight.add(resource);
+    this.initialSnapshotRetryAttempts.set(resource, (this.initialSnapshotRetryAttempts.get(resource) ?? 0) + 1);
     try {
       const response = await this.sendSync({ resource, action: "GET" }, 20_000);
       await this.forwardMessage(response);
@@ -155,6 +166,7 @@ export class HomeConnectClient {
     } catch (error) {
       if (this.closing || !this.connected || this.initialSnapshotsReceived.has(resource)) return;
       this.log?.warn(`GET ${resource} background retry failed: ${String(error)}`);
+      this.communicationFailureHandler?.(error instanceof Error ? error : new Error(String(error)));
       if (isRetryableInitialReadError(error)) this.scheduleInitialSnapshotRetry(resource);
     } finally {
       this.initialSnapshotRetriesInFlight.delete(resource);
@@ -164,6 +176,7 @@ export class HomeConnectClient {
   private markInitialSnapshotReceived(resource: string | undefined): void {
     if (!resource) return;
     this.initialSnapshotsReceived.add(resource);
+    this.initialSnapshotRetryAttempts.delete(resource);
     const timer = this.initialSnapshotRetryTimers.get(resource);
     if (timer) clearTimeout(timer);
     this.initialSnapshotRetryTimers.delete(resource);
@@ -174,6 +187,7 @@ export class HomeConnectClient {
     this.initialSnapshotRetryTimers.clear();
     this.initialSnapshotRetriesInFlight.clear();
     this.initialSnapshotsReceived.clear();
+    this.initialSnapshotRetryAttempts.clear();
   }
 
   public async writeValue(uid: number, value: unknown): Promise<HcMessage> {

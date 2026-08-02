@@ -54,6 +54,16 @@ export interface ConfiguredDevice {
   mac?: string;
   connectionType?: string;
   profileFile?: string;
+  enablePowerReset?: boolean;
+  enableWifiReconnect?: boolean;
+  wifiReconnectWaitMinutes?: number;
+  wifiReconnectUseMac?: boolean;
+  powerMeasurementStateId?: string;
+  powerSwitchStateId?: string;
+  powerSwitchFeedbackStateId?: string;
+  powerResetThresholdWatts?: number;
+  powerResetIdleMinutes?: number;
+  powerResetFailureCount?: number;
 }
 
 export interface AdapterNativeConfig {

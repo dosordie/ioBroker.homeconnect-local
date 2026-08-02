@@ -5,6 +5,51 @@ const { translateEnumValue, translatedCompanionValueForTarget } = require("../bu
 const { metadataForFeature } = require("../build/lib/stateMetadata");
 const { hasWritableProgramOption } = require("../build/lib/optionWriteability");
 const { activeEventSummaryItems, activeEventSummaryTextDe } = require("../build/lib/eventSummary");
+const {
+  POWER_MEASUREMENT_MAX_AGE_MS,
+  powerResetBlockReason,
+  stagedRecoveryAction,
+  wifiReconnectPulseValue,
+} = require("../build/lib/powerReset");
+
+test("staged recovery performs Wi-Fi first and only one power reset until recovery", () => {
+  assert.equal(stagedRecoveryAction(2, 3, false, false, false), "none");
+  assert.equal(stagedRecoveryAction(3, 3, false, false, false), "wifiReconnect");
+  assert.equal(stagedRecoveryAction(3, 3, true, false, false), "waitForWifi");
+  assert.equal(stagedRecoveryAction(3, 3, true, true, false), "powerReset");
+  assert.equal(stagedRecoveryAction(10, 3, true, true, true), "lockedUntilRecovery");
+});
+
+test("Wi-Fi recovery can emit boolean true or the appliance MAC address", () => {
+  assert.equal(wifiReconnectPulseValue(false, "AA:BB", "CC:DD"), true);
+  assert.equal(wifiReconnectPulseValue(true, "AA:BB", "CC:DD"), "AA:BB");
+  assert.equal(wifiReconnectPulseValue(true, "", "CC:DD"), "CC:DD");
+  assert.equal(wifiReconnectPulseValue(true), "");
+});
+
+test("power reset requires repeated failures, fresh low power and a completed idle period", () => {
+  const now = 1_000_000;
+  const safe = {
+    enabled: true,
+    failures: 3,
+    requiredFailures: 3,
+    watts: 4.9,
+    measurementTimestamp: now,
+    lowPowerSince: now - 15 * 60_000,
+    now,
+    thresholdWatts: 5,
+    idleMs: 15 * 60_000,
+    resetInProgress: false,
+    powerSwitchFeedback: true,
+  };
+  assert.equal(powerResetBlockReason(safe), undefined);
+  assert.equal(powerResetBlockReason({ ...safe, failures: 2 }), "not enough communication failures");
+  assert.equal(powerResetBlockReason({ ...safe, powerSwitchFeedback: false }), "power switch feedback is not confirmed on");
+  assert.equal(powerResetBlockReason({ ...safe, watts: 5 }), "appliance is not below the idle power threshold");
+  assert.equal(powerResetBlockReason({ ...safe, lowPowerSince: now - 14 * 60_000 }), "idle power has not been observed long enough");
+  assert.equal(powerResetBlockReason({ ...safe, measurementTimestamp: now - POWER_MEASUREMENT_MAX_AGE_MS - 1 }), "power measurement is stale");
+  assert.equal(powerResetBlockReason({ ...safe, watts: -1 }), "power measurement is missing or invalid");
+});
 
 function profileWithProgramOptions(programOptionsByUid) {
   return {
@@ -985,8 +1030,9 @@ test("malformed allMandatoryValues retry classification remains available", () =
 });
 
 test("initial RO snapshot retries timeouts and malformed responses", () => {
-  const { INITIAL_SNAPSHOT_BACKGROUND_RETRY_MS, isRetryableInitialReadError } = require("../build/lib/client");
+  const { INITIAL_SNAPSHOT_BACKGROUND_MAX_ATTEMPTS, INITIAL_SNAPSHOT_BACKGROUND_RETRY_MS, isRetryableInitialReadError } = require("../build/lib/client");
   assert.equal(INITIAL_SNAPSHOT_BACKGROUND_RETRY_MS, 30_000);
+  assert.equal(INITIAL_SNAPSHOT_BACKGROUND_MAX_ATTEMPTS, 3);
   assert.equal(isRetryableInitialReadError(new Error("Timeout waiting for response to /ro/allMandatoryValues")), true);
   assert.equal(isRetryableInitialReadError(new Error("Malformed Home Connect JSON for /ro/allMandatoryValues")), true);
   assert.equal(isRetryableInitialReadError(new Error("Home Connect client closed")), false);

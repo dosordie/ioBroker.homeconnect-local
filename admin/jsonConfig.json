@@ -4,7 +4,7 @@
   "items": {
     "main": {
       "type": "panel",
-      "label": "Main settings",
+      "label": "General settings",
       "items": {
         "_profileUploadHint": {
           "type": "infoBox",
@@ -96,11 +96,25 @@
           "help": "Creates debug states raw.uid_<uid> with raw Home Connect values.",
           "sm": 12,
           "md": 6
+        }
+      }
+    },
+    "appliances": {
+      "type": "panel",
+      "label": "Appliances and recovery",
+      "items": {
+        "_deviceHint": {
+          "type": "infoBox",
+          "title": "Clear per-appliance configuration",
+          "text": "Each row contains only the settings you normally need. For power recovery, write the current wattage to <device>.recovery.powerMeasurementWatts and the real actor status to <device>.recovery.powerSwitchFeedback from Node-RED. You only need to enter the writable power switch output ID. Hover over recovery column headings for detailed explanations.",
+          "boxType": "info",
+          "sm": 12,
+          "md": 12
         },
         "devices": {
           "type": "table",
           "label": "Appliances",
-          "help": "Only Enabled, Name and IP or host should normally be edited. The other columns are filled from the scanned profile ZIP files.",
+          "help": "Configure one appliance per row. Scanned profile metadata is stored automatically. Recovery inputs are created as writable ioBroker objects below each appliance and can be populated from Node-RED.",
           "items": [
             {
               "attr": "enabled",
@@ -128,99 +142,60 @@
               "readOnly": true
             },
             {
-              "attr": "type",
-              "type": "text",
-              "title": "Type",
-              "width": "130",
-              "readOnly": true
-            },
-            {
-              "attr": "brand",
-              "type": "text",
-              "title": "Brand",
-              "width": "120",
-              "readOnly": true
-            },
-            {
-              "attr": "vib",
-              "type": "text",
-              "title": "VIB",
-              "width": "150",
-              "readOnly": true
-            },
-            {
-              "attr": "connectionType",
-              "type": "text",
-              "title": "Connection",
-              "width": "120",
-              "readOnly": true
-            },
-            {
-              "attr": "profileFile",
-              "type": "text",
-              "title": "Profile file",
-              "width": "520",
-              "readOnly": true
-            },
-            {
               "attr": "enableWifiReconnect",
               "type": "checkbox",
-              "title": "Wi-Fi reconnect",
-              "width": "130"
+              "title": "Enable Wi-Fi recovery",
+              "width": "130",
+              "tooltip": "After the configured number of communication failures, pulse the appliance recovery output for Node-RED."
             },
             {
               "attr": "wifiReconnectWaitMinutes",
               "type": "number",
-              "title": "Wi-Fi wait minutes",
-              "width": "140"
+              "title": "Recovery wait (minutes)",
+              "width": "140",
+              "tooltip": "Grace period after the Wi-Fi recovery pulse. A power reset is considered only if communication has not recovered when this time expires (minimum 1 minute)."
             },
             {
               "attr": "wifiReconnectUseMac",
               "type": "checkbox",
-              "title": "Output MAC instead of True",
-              "width": "190"
+              "title": "Send MAC address",
+              "width": "190",
+              "tooltip": "Send the appliance MAC address instead of true in the Wi-Fi recovery pulse."
             },
             {
               "attr": "enablePowerReset",
               "type": "checkbox",
-              "title": "Power reset",
-              "width": "110"
-            },
-            {
-              "attr": "powerMeasurementStateId",
-              "type": "text",
-              "title": "Power input state ID",
-              "width": "300"
+              "title": "Enable power reset",
+              "width": "110",
+              "tooltip": "Enable the second recovery stage. This requires Wi-Fi recovery, power data, switch feedback, and a configured switch output."
             },
             {
               "attr": "powerSwitchStateId",
               "type": "text",
-              "title": "Power switch output state ID",
-              "width": "300"
-            },
-            {
-              "attr": "powerSwitchFeedbackStateId",
-              "type": "text",
-              "title": "Power switch feedback state ID",
-              "width": "300"
+              "title": "Power switch output ID",
+              "width": "300",
+              "tooltip": "Full writable boolean ioBroker state ID. The adapter writes false for 10 seconds and then true."
             },
             {
               "attr": "powerResetThresholdWatts",
               "type": "number",
-              "title": "Idle below W",
-              "width": "130"
+              "title": "Idle threshold (W)",
+              "width": "130",
+              "tooltip": "The appliance counts as idle only while measured consumption remains below this value."
             },
             {
               "attr": "powerResetIdleMinutes",
               "type": "number",
-              "title": "Idle minutes",
-              "width": "120"
+              "title": "Low-power duration (minutes)",
+              "width": "120",
+              "tooltip": "Consumption must remain continuously below the idle threshold for this entire time before a power reset is allowed (minimum 5 minutes)."
             },
             {
               "attr": "powerResetFailureCount",
               "type": "number",
-              "title": "Failures",
-              "width": "100"
+              "title": "Failures before recovery",
+              "width": "100",
+              "tooltip": "Number of consecutive Home Connect communication failures required before staged recovery starts (minimum 3)."
             }
           ]
         }

@@ -546,21 +546,17 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     if (device.config.enablePowerReset !== true) return;
     await this.ensureStateObject(`${device.baseId}.recovery.powerMeasurementWatts`, "Power measurement supplied externally", 0, "value.power.consumption", true, { unit: "W" });
     await this.ensureStateObject(`${device.baseId}.recovery.powerSwitchFeedback`, "Power switch feedback supplied externally", false, "indicator", true);
-    const switchStateIdObject = `${device.baseId}.recovery.powerSwitchStateId`;
-    await this.ensureStateObject(switchStateIdObject, "Power switch output state ID supplied externally", "", "text", true);
-    const configuredSwitchId = device.config.powerSwitchStateId?.trim() ?? "";
-    if (!(await this.getStateAsync(switchStateIdObject))) {
-      await this.setState(switchStateIdObject, configuredSwitchId, true);
-    }
+    const switchId = this.powerSwitchStateId(device);
+    await this.ensureStateObject(switchId, "Power switch command", true, "switch");
+    await this.setState(switchId, true, true);
     const measurementId = this.powerMeasurementStateId(device);
-    const switchId = await this.powerSwitchStateId(device);
     const switchFeedbackId = this.powerSwitchFeedbackStateId(device);
     if (device.config.enableWifiReconnect !== true) {
       this.log.warn(`${device.profile.haId}: power reset requires the first-stage Wi-Fi reconnect to be enabled; automatic power cuts are disabled`);
       return;
     }
-    if (!measurementId || !switchId || !switchFeedbackId) {
-      this.log.warn(`${device.profile.haId}: power switch output state ID is missing; automatic power cuts are disabled`);
+    if (!measurementId || !switchFeedbackId) {
+      this.log.warn(`${device.profile.haId}: required power reset inputs are missing; automatic power cuts are disabled`);
       return;
     }
     await this.subscribeForeignStatesAsync(measurementId);
@@ -676,7 +672,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
 
   private async tryPowerReset(device: RunningDevice): Promise<void> {
     const measurementId = this.powerMeasurementStateId(device);
-    const switchId = await this.powerSwitchStateId(device);
+    const switchId = this.powerSwitchStateId(device);
     const switchFeedbackId = this.powerSwitchFeedbackStateId(device);
     if (!measurementId || !switchId || !switchFeedbackId || this.unloaded || device.powerResetPerformed === true) return;
     const measurement = await this.getForeignStateAsync(measurementId);
@@ -710,7 +706,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     this.log.warn(`${device.profile.haId}: all safety conditions passed; switching ${switchId} False for ${POWER_RESET_OFF_MS / 1000}s`);
     let switchedOff = false;
     try {
-      await this.setForeignStateAsync(switchId, false, false);
+      await this.setState(switchId, false, true);
       switchedOff = true;
       device.powerResetPerformed = true;
       await this.setState(`${device.baseId}.info.powerResetLocked`, true, true).catch(error => {
@@ -719,7 +715,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await new Promise(resolve => setTimeout(resolve, POWER_RESET_OFF_MS));
     } finally {
       try {
-        if (switchedOff) await this.setForeignStateAsync(switchId, true, false);
+        if (switchedOff) await this.setState(switchId, true, true);
       } finally {
         device.powerResetInProgress = false;
         device.powerResetLowPowerSince = undefined;
@@ -742,9 +738,8 @@ class HomeconnectLocalAdapter extends utils.Adapter {
     return device.config.powerSwitchFeedbackStateId?.trim() || `${this.namespace}.${device.baseId}.recovery.powerSwitchFeedback`;
   }
 
-  private async powerSwitchStateId(device: RunningDevice): Promise<string> {
-    const state = await this.getStateAsync(`${device.baseId}.recovery.powerSwitchStateId`);
-    return typeof state?.val === "string" ? state.val.trim() : (device.config.powerSwitchStateId?.trim() ?? "");
+  private powerSwitchStateId(device: RunningDevice): string {
+    return `${device.baseId}.recovery.powerSwitchStateId`;
   }
 
   private powerResetIdleMs(device: RunningDevice): number {

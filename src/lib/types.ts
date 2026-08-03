@@ -59,7 +59,6 @@ export interface ConfiguredDevice {
   wifiReconnectWaitMinutes?: number;
   wifiReconnectUseMac?: boolean;
   powerMeasurementStateId?: string;
-  powerSwitchStateId?: string;
   powerSwitchFeedbackStateId?: string;
   powerResetThresholdWatts?: number;
   powerResetIdleMinutes?: number;

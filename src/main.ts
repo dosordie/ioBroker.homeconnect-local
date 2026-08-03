@@ -544,15 +544,17 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       this.log.info(`${device.profile.haId}: Wi-Fi reconnect recovery armed (output ${device.baseId}.recovery.wifiReconnectRequested)`);
     }
     if (device.config.enablePowerReset !== true) return;
-    const measurementId = device.config.powerMeasurementStateId?.trim();
+    await this.ensureStateObject(`${device.baseId}.recovery.powerMeasurementWatts`, "Power measurement supplied externally", 0, "value.power.consumption", true, { unit: "W" });
+    await this.ensureStateObject(`${device.baseId}.recovery.powerSwitchFeedback`, "Power switch feedback supplied externally", false, "indicator", true);
+    const measurementId = this.powerMeasurementStateId(device);
     const switchId = device.config.powerSwitchStateId?.trim();
-    const switchFeedbackId = device.config.powerSwitchFeedbackStateId?.trim();
+    const switchFeedbackId = this.powerSwitchFeedbackStateId(device);
     if (device.config.enableWifiReconnect !== true) {
       this.log.warn(`${device.profile.haId}: power reset requires the first-stage Wi-Fi reconnect to be enabled; automatic power cuts are disabled`);
       return;
     }
     if (!measurementId || !switchId || !switchFeedbackId) {
-      this.log.warn(`${device.profile.haId}: power reset wattage input, switch output, or separate switch feedback state ID is incomplete; automatic power cuts are disabled`);
+      this.log.warn(`${device.profile.haId}: power switch output state ID is missing; automatic power cuts are disabled`);
       return;
     }
     await this.subscribeForeignStatesAsync(measurementId);
@@ -667,9 +669,9 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   }
 
   private async tryPowerReset(device: RunningDevice): Promise<void> {
-    const measurementId = device.config.powerMeasurementStateId?.trim();
+    const measurementId = this.powerMeasurementStateId(device);
     const switchId = device.config.powerSwitchStateId?.trim();
-    const switchFeedbackId = device.config.powerSwitchFeedbackStateId?.trim();
+    const switchFeedbackId = this.powerSwitchFeedbackStateId(device);
     if (!measurementId || !switchId || !switchFeedbackId || this.unloaded || device.powerResetPerformed === true) return;
     const measurement = await this.getForeignStateAsync(measurementId);
     const switchFeedback = await this.getForeignStateAsync(switchFeedbackId);
@@ -724,6 +726,14 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private powerResetThresholdWatts(device: RunningDevice): number {
     const value = Number(device.config.powerResetThresholdWatts ?? DEFAULT_POWER_RESET_THRESHOLD_WATTS);
     return Number.isFinite(value) ? Math.max(0.1, value) : DEFAULT_POWER_RESET_THRESHOLD_WATTS;
+  }
+
+  private powerMeasurementStateId(device: RunningDevice): string {
+    return device.config.powerMeasurementStateId?.trim() || `${this.namespace}.${device.baseId}.recovery.powerMeasurementWatts`;
+  }
+
+  private powerSwitchFeedbackStateId(device: RunningDevice): string {
+    return device.config.powerSwitchFeedbackStateId?.trim() || `${this.namespace}.${device.baseId}.recovery.powerSwitchFeedback`;
   }
 
   private powerResetIdleMs(device: RunningDevice): number {
@@ -987,7 +997,7 @@ class HomeconnectLocalAdapter extends utils.Adapter {
   private async onStateChange(id: string, state: ioBroker.State | null | undefined): Promise<void> {
     if (this.unloaded || !state) return;
     for (const device of this.devices.values()) {
-      if (device.config.enablePowerReset === true && id === device.config.powerMeasurementStateId) {
+      if (device.config.enablePowerReset === true && id === this.powerMeasurementStateId(device)) {
         this.recordPowerMeasurement(device, state);
         return;
       }

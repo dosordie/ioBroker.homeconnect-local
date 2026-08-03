@@ -2,9 +2,13 @@
   "_id": "homeconnect-local",
   "common": {
     "name": "homeconnect-local",
-    "version": "0.0.17",
+    "version": "0.0.18",
     "icon": "homeconnect-local.svg",
     "news": {
+      "0.0.18": {
+        "en": "Improves the appliance configuration and creates writable power recovery input states for Node-RED.",
+        "de": "Verbessert die Gerätekonfiguration und erstellt beschreibbare Eingabe-States für die Power-Recovery mit Node-RED."
+      },
       "0.0.17": {
         "en": "Prepares the 0.0.17 release with updated documentation and release notes.",
         "de": "Bereitet das Release 0.0.17 mit aktualisierter Dokumentation und Release-Notizen vor."

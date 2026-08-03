@@ -130,14 +130,14 @@ The Wi-Fi trigger requires repeated communication failures, but intentionally do
 The optional second stage is intended for a switchable external power supply and an independently measured power value. It requires the Wi-Fi stage to be enabled. Configure:
 
 - `Power reset`: explicitly enables the function.
-- `Power input state ID`: full ioBroker state ID containing the current consumption in watts.
+- `<device>.recovery.powerMeasurementWatts`: writable number state created by the adapter. Supply the current consumption in watts from Node-RED.
 - `Power switch output state ID`: full ioBroker writable boolean state ID; `false` cuts power and `true` restores it.
-- `Power switch feedback state ID`: separate boolean input carrying the actor's actual switching status. It must explicitly be `true`; `false`, a missing value, or a non-boolean value blocks the reset even if the command output says otherwise.
-- `Idle below W`: idle threshold (default 5 W).
-- `Idle minutes`: uninterrupted observation time below the threshold (default 15 minutes, hard minimum 5 minutes).
-- `Failures`: required communication failures (default and hard minimum 3).
+- `<device>.recovery.powerSwitchFeedback`: writable boolean state created by the adapter. Supply the actor's real switching status from Node-RED. It must explicitly be `true`; `false`, a missing value, or a non-boolean value blocks the reset even if the command output says otherwise.
+- `Idle threshold (W)`: consumption must be below this value for the appliance to count as idle (default 5 W).
+- `Low-power duration (minutes)`: uninterrupted time for which consumption must remain below the idle threshold before a reset is allowed (default 15 minutes, hard minimum 5 minutes).
+- `Failures before recovery`: consecutive Home Connect communication failures required before the staged recovery starts (default and hard minimum 3).
 
-The adapter does **not** cut power merely because the appliance is offline. It first emits the Wi-Fi trigger and waits for its configured grace period. Only if communication still has not recovered does it evaluate the power-reset gates: all configured state IDs, repeated failures, a numeric non-negative and recent wattage measurement, uninterrupted consumption below the threshold for the full idle period, and separate actor feedback explicitly confirmed as `true`. It then writes `false`, waits 10 seconds, and restores `true`. Feedback `false` is treated as an intentional or already active shutdown and therefore blocks all switching. Missing, stale, invalid, negative, or high consumption also blocks the reset.
+The adapter does **not** cut power merely because the appliance is offline. It first emits the Wi-Fi trigger and waits for its configured grace period. Only if communication still has not recovered does it evaluate the power-reset gates: the required states, repeated failures, a numeric non-negative and recent wattage measurement, uninterrupted consumption below the threshold for the full idle period, and separate actor feedback explicitly confirmed as `true`. It then writes `false`, waits 10 seconds, and restores `true`. Feedback `false` is treated as an intentional or already active shutdown and therefore blocks all switching. Missing, stale, invalid, negative, or high consumption also blocks the reset.
 
 At most one power reset is performed in a failure episode. The lock and the preceding Wi-Fi trigger timestamp are persisted in the appliance's `info` states, so an adapter restart does not silently permit another immediate power cut. Further failures cannot produce another power cut until a valid Home Connect `/ro/*` message has demonstrated communication recovery and re-armed the sequence. The external switch should still be designed to restore power safely if ioBroker itself fails.
 
@@ -425,6 +425,13 @@ Typical local handshake:
 7. Live updates arrive through `/ro/values` and related `/ro/*` notifications.
 
 ## Release notes
+
+### 0.0.18
+
+- Splits general and appliance settings into separate tabs and reduces the device table to actionable fields.
+- Adds detailed descriptions for recovery wait time, low-power duration and communication failures.
+- Creates writable per-appliance wattage and power-switch feedback input objects for Node-RED.
+- Updates adapter version metadata to `0.0.18`.
 
 ### 0.0.17
 

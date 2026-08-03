@@ -131,7 +131,7 @@ The optional second stage is intended for a switchable external power supply and
 
 - `Power reset`: explicitly enables the function.
 - `<device>.recovery.powerMeasurementWatts`: writable number state created by the adapter. Supply the current consumption in watts from Node-RED.
-- `<device>.recovery.powerSwitchStateId`: writable string state created by the adapter. Supply the full ID of the writable boolean ioBroker switch state from Node-RED; the configured `Power switch output state ID` is used as its initial value. The adapter writes `false` to that target to cut power and `true` to restore it.
+- `<device>.recovery.powerSwitchStateId`: read-only boolean output created by the adapter and intended to be observed by Node-RED. It is initialized to `true`; the adapter writes `false` to request that power be cut and, after 10 seconds, `true` to request that power be restored. No external output ID has to be configured.
 - `<device>.recovery.powerSwitchFeedback`: writable boolean state created by the adapter. Supply the actor's real switching status from Node-RED. It must explicitly be `true`; `false`, a missing value, or a non-boolean value blocks the reset even if the command output says otherwise.
 - `Idle threshold (W)`: consumption must be below this value for the appliance to count as idle (default 5 W).
 - `Low-power duration (minutes)`: uninterrupted time for which consumption must remain below the idle threshold before a reset is allowed (default 15 minutes, hard minimum 5 minutes).
@@ -430,7 +430,7 @@ Typical local handshake:
 
 - Splits general and appliance settings into separate tabs and reduces the device table to actionable fields.
 - Adds detailed descriptions for recovery wait time, low-power duration and communication failures.
-- Creates writable per-appliance wattage, power-switch feedback, and power-switch output ID input objects for Node-RED.
+- Creates per-appliance wattage and power-switch feedback inputs plus a boolean power-switch command output for Node-RED.
 - Updates adapter version metadata to `0.0.18`.
 
 ### 0.0.17

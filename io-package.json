@@ -6,8 +6,8 @@
     "icon": "homeconnect-local.svg",
     "news": {
       "0.0.18": {
-        "en": "Improves the appliance configuration and creates writable power recovery input states, including the switch output ID, for Node-RED.",
-        "de": "Verbessert die Gerätekonfiguration und erstellt beschreibbare Eingabe-States einschließlich der Netzschalter-Ausgangs-ID für die Power-Recovery mit Node-RED."
+        "en": "Improves appliance configuration and exposes the power recovery switch command as a boolean ioBroker state for Node-RED.",
+        "de": "Verbessert die Gerätekonfiguration und stellt den Netzschalter-Befehl für die Power-Recovery als booleschen ioBroker-State bereit."
       },
       "0.0.17": {
         "en": "Prepares the 0.0.17 release with updated documentation and release notes.",

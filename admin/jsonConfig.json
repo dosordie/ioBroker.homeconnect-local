@@ -106,7 +106,7 @@
         "_deviceHint": {
           "type": "infoBox",
           "title": "Clear per-appliance configuration",
-          "text": "Each row contains only the settings you normally need. For power recovery, link the wattage, real actor status, and writable power switch output ID to the corresponding <device>.recovery objects in Node-RED. Hover over recovery column headings for detailed explanations.",
+          "text": "Each row contains only the settings you normally need. For power recovery, link the wattage and real actor status to the corresponding <device>.recovery inputs in Node-RED and observe the boolean power-switch output there. Hover over recovery column headings for detailed explanations.",
           "boxType": "info",
           "sm": 12,
           "md": 12
@@ -167,14 +167,7 @@
               "type": "checkbox",
               "title": "Enable power reset",
               "width": "110",
-              "tooltip": "Enable the second recovery stage. This requires Wi-Fi recovery, power data, switch feedback, and a configured switch output."
-            },
-            {
-              "attr": "powerSwitchStateId",
-              "type": "text",
-              "title": "Power switch output ID",
-              "width": "300",
-              "tooltip": "Full writable boolean ioBroker state ID. The adapter writes false for 10 seconds and then true."
+              "tooltip": "Enable the second recovery stage. This requires Wi-Fi recovery, power data, and switch feedback; the boolean switch command is exposed as an ioBroker object."
             },
             {
               "attr": "powerResetThresholdWatts",

@@ -101,12 +101,12 @@
     },
     "appliances": {
       "type": "panel",
-      "label": "Appliances and recovery",
+      "label": "Appliances",
       "items": {
         "_deviceHint": {
           "type": "infoBox",
           "title": "Clear per-appliance configuration",
-          "text": "Each row contains only the settings you normally need. For power recovery, write the current wattage to <device>.recovery.powerMeasurementWatts and the real actor status to <device>.recovery.powerSwitchFeedback from Node-RED. You only need to enter the writable power switch output ID. Hover over recovery column headings for detailed explanations.",
+          "text": "Each row contains only the settings you normally need. For power recovery, link the wattage, real actor status, and writable power switch output ID to the corresponding <device>.recovery objects in Node-RED. Hover over recovery column headings for detailed explanations.",
           "boxType": "info",
           "sm": 12,
           "md": 12

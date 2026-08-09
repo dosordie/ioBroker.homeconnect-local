@@ -7,6 +7,7 @@ const { hasWritableProgramOption } = require("../build/lib/optionWriteability");
 const { activeEventSummaryItems, activeEventSummaryTextDe } = require("../build/lib/eventSummary");
 const {
   POWER_MEASUREMENT_MAX_AGE_MS,
+  WIFI_RECONNECT_PULSE_MS,
   powerResetBlockReason,
   stagedRecoveryAction,
   wifiReconnectPulseValue,
@@ -21,6 +22,7 @@ test("staged recovery performs Wi-Fi first and only one power reset until recove
 });
 
 test("Wi-Fi recovery can emit boolean true or the appliance MAC address", () => {
+  assert.equal(WIFI_RECONNECT_PULSE_MS, 10_000);
   assert.equal(wifiReconnectPulseValue(false, "AA:BB", "CC:DD"), true);
   assert.equal(wifiReconnectPulseValue(true, "AA:BB", "CC:DD"), "AA:BB");
   assert.equal(wifiReconnectPulseValue(true, "", "CC:DD"), "CC:DD");

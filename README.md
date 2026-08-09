@@ -121,7 +121,7 @@ Important config fields:
 Recovery is configured separately for each appliance in the device table and both stages are disabled by default. Configure the first stage:
 
 - `Wi-Fi reconnect`: explicitly enables the first recovery stage.
-- `<device>.recovery.wifiReconnectRequested`: output object created by the adapter and intended to be observed by Node-RED. By default the adapter pulses it to boolean `true` for one second; no external output ID has to be configured.
+- `<device>.recovery.wifiReconnectRequested`: output object created by the adapter and intended to be observed by Node-RED. By default the adapter pulses it to boolean `true` for ten seconds, so polling automations can reliably observe it; no external output ID has to be configured.
 - `Wi-Fi wait minutes`: time allowed for communication to recover after the trigger (default 2 minutes, hard minimum 1 minute).
 - `Output MAC instead of True`: optionally changes the recovery output to a string and emits the appliance MAC address instead of `true`, then clears it to an empty string. The MAC comes from the configured device/profile metadata; if none is available, the Wi-Fi trigger is safely blocked.
 

@@ -4,7 +4,9 @@ export const DEFAULT_POWER_RESET_FAILURES = 3;
 export const POWER_RESET_OFF_MS = 10_000;
 export const POWER_MEASUREMENT_MAX_AGE_MS = 2 * 60_000;
 export const DEFAULT_WIFI_RECONNECT_WAIT_MINUTES = 2;
-export const WIFI_RECONNECT_PULSE_MS = 1_000;
+// Keep the trigger asserted long enough for polling automations (for example a
+// Node-RED poll running every few seconds) to observe the true value reliably.
+export const WIFI_RECONNECT_PULSE_MS = 10_000;
 
 export interface PowerResetSafetyInput {
   enabled: boolean;

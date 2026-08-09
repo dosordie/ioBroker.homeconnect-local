@@ -125,7 +125,7 @@ Recovery is configured separately for each appliance in the device table and bot
 - `Wi-Fi wait minutes`: time allowed for communication to recover after the trigger (default 2 minutes, hard minimum 1 minute).
 - `Output MAC instead of True`: optionally changes the recovery output to a string and emits the appliance MAC address instead of `true`, then clears it to an empty string. The MAC comes from the configured device/profile metadata; if none is available, the Wi-Fi trigger is safely blocked.
 
-The Wi-Fi trigger requires repeated communication failures, but intentionally does not require low power: the appliance may be running while only its Wi-Fi connection is stuck. It is emitted only once in a failure episode. A valid subsequent `/ro/*` message counts as recovery and re-arms both recovery stages.
+The Wi-Fi trigger requires repeated communication failures, but intentionally does not require low power: the appliance may be running while only its Wi-Fi connection is stuck. It is emitted only once in a failure episode. A valid subsequent `/ro/*` message counts as recovery and re-arms both recovery stages. When only Wi-Fi recovery is enabled, an adapter restart also starts a fresh failure episode, so an appliance that was already offline can produce a new pulse after the configured number of failures.
 
 The optional second stage is intended for a switchable external power supply and an independently measured power value. It requires the Wi-Fi stage to be enabled. Configure:
 

@@ -9,6 +9,7 @@ const {
   POWER_MEASUREMENT_MAX_AGE_MS,
   WIFI_RECONNECT_PULSE_MS,
   powerResetBlockReason,
+  shouldRestoreWifiReconnectLatch,
   stagedRecoveryAction,
   wifiReconnectPulseValue,
 } = require("../build/lib/powerReset");
@@ -27,6 +28,11 @@ test("Wi-Fi recovery can emit boolean true or the appliance MAC address", () => 
   assert.equal(wifiReconnectPulseValue(true, "AA:BB", "CC:DD"), "AA:BB");
   assert.equal(wifiReconnectPulseValue(true, "", "CC:DD"), "CC:DD");
   assert.equal(wifiReconnectPulseValue(true), "");
+});
+
+test("standalone Wi-Fi recovery starts a fresh failure episode after adapter restart", () => {
+  assert.equal(shouldRestoreWifiReconnectLatch(false), false);
+  assert.equal(shouldRestoreWifiReconnectLatch(true), true);
 });
 
 test("power reset requires repeated failures, fresh low power and a completed idle period", () => {

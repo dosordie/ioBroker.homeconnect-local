@@ -33,7 +33,7 @@ import { evaluateEffectivePowerState, POWER_STATE_FEATURE } from "./lib/effectiv
 import { evaluateHobZoneSummary, isHobZoneFeature } from "./lib/hobActiveZones";
 import { hasWritableProgramOption, isProgramOptionDescriptionWritable, isReadOnlyProgramOption, isWritableAccess, normalizedAccess } from "./lib/optionWriteability";
 import { AdapterNativeConfig, ApplianceProfile, ConfiguredDevice, HcMessage, RoValue, StateTarget } from "./lib/types";
-import { DEFAULT_POWER_RESET_FAILURES, DEFAULT_POWER_RESET_IDLE_MINUTES, DEFAULT_POWER_RESET_THRESHOLD_WATTS, DEFAULT_WIFI_RECONNECT_WAIT_MINUTES, POWER_RESET_OFF_MS, WIFI_RECONNECT_PULSE_MS, powerResetBlockReason, stagedRecoveryAction, wifiReconnectPulseValue } from "./lib/powerReset";
+import { DEFAULT_POWER_RESET_FAILURES, DEFAULT_POWER_RESET_IDLE_MINUTES, DEFAULT_POWER_RESET_THRESHOLD_WATTS, DEFAULT_WIFI_RECONNECT_WAIT_MINUTES, POWER_RESET_OFF_MS, WIFI_RECONNECT_PULSE_MS, powerResetBlockReason, shouldRestoreWifiReconnectLatch, stagedRecoveryAction, wifiReconnectPulseValue } from "./lib/powerReset";
 
 interface DiscoveryScanResult {
   found: DiscoveredHomeConnectDevice[];
@@ -536,7 +536,13 @@ class HomeconnectLocalAdapter extends utils.Adapter {
       await this.ensureStateObject(`${device.baseId}.info.powerResetLocked`, "Power reset locked until valid RO communication", false, "indicator");
       const wifiTriggeredAt = await this.getStateAsync(`${device.baseId}.info.wifiReconnectTriggeredAt`);
       const powerResetLocked = await this.getStateAsync(`${device.baseId}.info.powerResetLocked`);
-      if (typeof wifiTriggeredAt?.val === "number" && wifiTriggeredAt.val > 0) device.wifiReconnectTriggeredAt = wifiTriggeredAt.val;
+      if (shouldRestoreWifiReconnectLatch(device.config.enablePowerReset === true)
+        && typeof wifiTriggeredAt?.val === "number" && wifiTriggeredAt.val > 0) {
+        device.wifiReconnectTriggeredAt = wifiTriggeredAt.val;
+      } else {
+        device.wifiReconnectTriggeredAt = undefined;
+        await this.setState(`${device.baseId}.info.wifiReconnectTriggeredAt`, 0, true);
+      }
       device.powerResetPerformed = powerResetLocked?.val === true;
       await this.setState(`${device.baseId}.recovery.wifiReconnectRequested`, wifiOutputInitialValue, true);
     }

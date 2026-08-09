@@ -37,6 +37,14 @@ export function wifiReconnectPulseValue(useMac: boolean, configuredMac?: string,
   return String(configuredMac || profileMac || "").trim();
 }
 
+export function shouldRestoreWifiReconnectLatch(enablePowerReset: boolean): boolean {
+  // The timestamp is a safety latch for the second stage: it prevents an
+  // adapter restart from allowing another immediate power cut. A standalone
+  // Wi-Fi recovery has no destructive second stage, so a restart must begin a
+  // fresh failure episode and allow its boolean/MAC pulse to fire again.
+  return enablePowerReset;
+}
+
 export function powerResetBlockReason(input: PowerResetSafetyInput): string | undefined {
   if (!input.enabled) return "power reset is disabled";
   if (input.resetInProgress) return "a power reset is already in progress";

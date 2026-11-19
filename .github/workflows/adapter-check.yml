@@ -1,10 +1,6 @@
 name: Package Check
 
 on:
-  pull_request:
-    branches:
-      - main
-      - work
   workflow_dispatch:
 
 jobs:
